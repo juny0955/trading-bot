@@ -1,1 +1,2 @@
-pub mod binance_spot_ws;
+pub mod binance_futures_ws;
+pub mod dtos;
