@@ -1,0 +1,14 @@
+services:
+  questdb:
+    image: questdb/questdb:latest
+    container_name: questdb
+    restart: always
+    ports:
+      - "9000:9000"   # Web Console 및 REST API
+      - "9009:9009"   # InfluxDB Line Protocol (고속 데이터 삽입)
+      - "8812:8812"   # Postgres Wire Protocol (SQL 쿼리용)
+      - "9003:9003"   # Health Check
+    volumes:
+      - questdb_data:/var/lib/questdb
+    environment:
+      - QDB_TELEMETRY_ENABLED=false
