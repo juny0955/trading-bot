@@ -11,7 +11,7 @@ use tracing::error;
 
 use crate::dtos::{BookTickerData, DepthData, StreamData, StreamEnvelope, TradeData};
 
-const WS_URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@trade/btcusdt@depth5@100ms/btcusdt@bookTicker";
+const WS_URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@trade/btcusdt@depth10@100ms/btcusdt@bookTicker";
 const RECONNECT_DELAY_SECS: u64 = 5;
 
 pub async fn subscribe_to_binance_futures_ws(

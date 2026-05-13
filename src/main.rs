@@ -63,6 +63,7 @@ fn spawn_binance() -> Vec<JoinHandle<()>> {
         tokio::spawn(async move {
             while let Some(d) = depth_rx.recv().await {
                 info!(
+                    symbol = %d.symbol,
                     fupd = d.first_update_id,
                     lupd = d.last_update_id,
                     bids = d.bids.len(),

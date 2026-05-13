@@ -38,6 +38,8 @@ pub struct PriceLevel(pub Decimal, pub Decimal);
 
 #[derive(Debug, Deserialize)]
 pub struct DepthData {
+    #[serde(rename = "s")]
+    pub symbol: String,
     #[serde(rename = "U")]
     pub first_update_id: u64,
     #[serde(rename = "u")]
@@ -92,3 +94,16 @@ pub enum FngStatus {
     #[serde(rename = "Extreme Greed")]
     ExtremeGreed,
 }
+
+impl FngStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FngStatus::ExtremeFear => "Extreme Fear",
+            FngStatus::Fear => "Fear",
+            FngStatus::Neutral => "Neutral",
+            FngStatus::Greed => "Greed",
+            FngStatus::ExtremeGreed => "Extreme Greed",
+        }
+    }
+}
+// ================ Alternative 데이터 ======================
