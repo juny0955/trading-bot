@@ -2,7 +2,7 @@ use anyhow::Result;
 use futures_util::future::join_all;
 use tokio::sync::mpsc::{self};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::info;
 use trading_bot::{
     alterantive_fng::fetch_alternative_fng,
     binance_futures_ws::subscribe_to_binance_futures_ws,
@@ -52,11 +52,9 @@ fn spawn_binance() -> Vec<JoinHandle<()>> {
     let (book_tx, mut book_rx) = mpsc::channel::<BookTickerData>(100);
 
     vec![
-        tokio::spawn(async move {
-            if let Err(e) = subscribe_to_binance_futures_ws(trade_tx, depth_tx, book_tx).await {
-                error!("WS 연결 에러: {e}");
-            }
-        }),
+        tokio::spawn(
+            async move { subscribe_to_binance_futures_ws(trade_tx, depth_tx, book_tx).await },
+        ),
         tokio::spawn(async move {
             while let Some(t) = trade_rx.recv().await {
                 info!(symbol = %t.symbol, price = %t.price, qty = %t.quantity, "trade");
