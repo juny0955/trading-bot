@@ -67,8 +67,7 @@ pub struct BookTickerData {
 #[derive(Debug, Deserialize)]
 pub struct FngResponse {
     pub name: String,
-    #[serde(rename = "data")]
-    pub date: Vec<FngData>,
+    pub data: Vec<FngData>,
 }
 
 #[derive(Debug, Deserialize)]
