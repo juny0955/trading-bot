@@ -1,6 +1,6 @@
 services:
   questdb:
-    image: questdb/questdb:latest
+    image: questdb/questdb:9.3.5
     container_name: questdb
     restart: always
     ports:
@@ -12,3 +12,6 @@ services:
       - questdb_data:/var/lib/questdb
     environment:
       - QDB_TELEMETRY_ENABLED=false
+
+volumes:
+  questdb_data:
