@@ -2,6 +2,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use trading_bot::{
+    alterantive_fng::fetch_alternative_fng,
     binance_futures_ws::subscribe_to_binance_futures_ws,
     dtos::{BookTickerData, DepthData, TradeData},
 };
@@ -16,6 +17,8 @@ async fn main() -> Result<()> {
         .with_target(false)
         .compact()
         .init();
+
+    let _ = fetch_alternative_fng().await;
 
     let (trade_tx, mut trade_rx) = mpsc::channel::<TradeData>(100);
     let (depth_tx, mut depth_rx) = mpsc::channel::<DepthData>(100);
@@ -34,7 +37,13 @@ async fn main() -> Result<()> {
     });
     tokio::spawn(async move {
         while let Some(d) = depth_rx.recv().await {
-            info!(bids = d.bids.len(), asks = d.asks.len(), "depth");
+            info!(
+                fupd = d.first_update_id,
+                lupd = d.last_update_id,
+                bids = d.bids.len(),
+                asks = d.asks.len(),
+                "depth"
+            );
         }
     });
 
