@@ -133,7 +133,7 @@ fn append_depth(buf: &mut Buffer, d: &DepthData) -> questdb::Result<()> {
             .column_f64(format!("ask{}_qty", i + 1).as_str(), qty)?;
     }
 
-    row.at(TimestampNanos::now())?;
+    row.at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
     Ok(())
 }
 
@@ -144,7 +144,7 @@ fn append_book_ticker(buf: &mut Buffer, d: &BookTickerData) -> questdb::Result<(
         .column_f64("bid_qty", d.bid_quantity.parse::<f64>().unwrap_or(0.0))?
         .column_f64("ask_price", d.ask_price.to_f64().unwrap_or(f64::NAN))?
         .column_f64("ask_qty", d.ask_quantity.parse::<f64>().unwrap_or(0.0))?
-        .at(TimestampNanos::now())?;
+        .at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
     Ok(())
 }
 

@@ -48,6 +48,8 @@ pub struct DepthData {
     pub bids: Vec<PriceLevel>,
     #[serde(rename = "a")]
     pub asks: Vec<PriceLevel>,
+    #[serde(rename = "E")]
+    pub event_time: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +64,8 @@ pub struct BookTickerData {
     pub ask_price: Decimal,
     #[serde(rename = "A")]
     pub ask_quantity: String,
+    #[serde(rename = "E")]
+    pub event_time: u64,
 }
 // ================ 바이낸스 데이터 ======================
 
