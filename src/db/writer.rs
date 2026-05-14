@@ -1,9 +1,15 @@
-use std::f64;
-
 use questdb::ingress::{Buffer, TimestampNanos};
 use rust_decimal::prelude::ToPrimitive;
+use std::f64;
 
 use crate::dtos::{BookTickerData, DepthData, FngData, TradeData};
+
+pub enum DbEvent {
+    Trade(TradeData),
+    Depth(DepthData),
+    BookTicker(BookTickerData),
+    Fng(FngData),
+}
 
 fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
     buf.table("trades")?

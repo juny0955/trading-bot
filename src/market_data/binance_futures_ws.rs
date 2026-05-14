@@ -9,33 +9,32 @@ use tokio_tungstenite::{
 };
 use tracing::error;
 
-use crate::dtos::{BookTickerData, DepthData, StreamData, StreamEnvelope, TradeData};
-
-const WS_URL: &str = "wss://fstream.binance.com/stream?streams=btcusdt@trade/btcusdt@depth10@100ms/btcusdt@bookTicker";
-const RECONNECT_DELAY_SECS: u64 = 5;
+use crate::{
+    BinanceConfig, BinanceRuntimeConfig,
+    dtos::{StreamData, StreamEnvelope},
+};
 
 pub async fn subscribe_to_binance_futures_ws(
-    trade_tx: Sender<TradeData>,
-    depth_tx: Sender<DepthData>,
-    book_tx: Sender<BookTickerData>,
+    cfg: BinanceConfig,
+    runtime_cfg: BinanceRuntimeConfig,
+    tx: Sender<StreamData>,
 ) {
     loop {
-        match stream(&trade_tx, &depth_tx, &book_tx).await {
+        match stream(&cfg.ws_url(), &tx).await {
             Ok(()) => break,
             Err(e) => {
-                error!("WS 에러: {e}, {RECONNECT_DELAY_SECS}초 후 재시도");
-                sleep(Duration::from_secs(RECONNECT_DELAY_SECS)).await;
+                error!(
+                    "WS 에러: {e}, {}초 후 재시도",
+                    runtime_cfg.reconnect_delay_sec
+                );
+                sleep(Duration::from_secs(runtime_cfg.reconnect_delay_sec)).await;
             }
         }
     }
 }
 
-async fn stream(
-    trade_tx: &Sender<TradeData>,
-    depth_tx: &Sender<DepthData>,
-    book_tx: &Sender<BookTickerData>,
-) -> Result<()> {
-    let request = WS_URL.into_client_request().context("잘못된 URL")?;
+async fn stream(url: &str, tx: &Sender<StreamData>) -> Result<()> {
+    let request = url.into_client_request().context("잘못된 URL")?;
     let (ws_stream, _) = connect_async(request).await.context("연결 실패")?;
 
     let (mut write, mut read) = ws_stream.split();
@@ -43,16 +42,10 @@ async fn stream(
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(envelope) = serde_json::from_str::<StreamEnvelope>(&text) {
-                    let closed = match envelope.data {
-                        StreamData::Trade(d) => trade_tx.send(d).await.is_err(),
-                        StreamData::Depth(d) => depth_tx.send(d).await.is_err(),
-                        StreamData::BookTicker(d) => book_tx.send(d).await.is_err(),
-                    };
-
-                    if closed {
-                        return Ok(());
-                    }
+                if let Ok(envelope) = serde_json::from_str::<StreamEnvelope>(&text)
+                    && tx.send(envelope.data).await.is_err()
+                {
+                    return Ok(());
                 }
             }
             Ok(Message::Ping(payload)) => {
