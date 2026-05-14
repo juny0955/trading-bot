@@ -2,7 +2,7 @@ use anyhow::Result;
 use futures_util::future::join_all;
 use tokio::sync::mpsc::{self, Sender};
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, warn};
 use trading_bot::dtos::StreamData;
 use trading_bot::writer::DbEvent;
 use trading_bot::{BinanceConfig, BinanceRuntimeConfig, FngRuntimeConfig, SharedConfig, writer};
@@ -10,7 +10,7 @@ use trading_bot::{
     alterantive_fng::fetch_alternative_fng,
     binance_futures_ws::subscribe_to_binance_futures_ws,
     db::config_reader::{init_db, load_config},
-    dtos::{BookTickerData, DepthData, FngData, TradeData},
+    dtos::FngData,
 };
 
 #[tokio::main]
@@ -72,7 +72,10 @@ fn spawn_fng(cfg: FngRuntimeConfig, db_tx: Sender<DbEvent>) -> Vec<JoinHandle<()
         }),
         tokio::spawn(async move {
             while let Some(f) = fng_rx.recv().await {
-                let _ = db_tx.send(DbEvent::Fng(f)).await;
+                if let Err(e) = db_tx.send(DbEvent::Fng(f)).await {
+                    warn!("QuestDB Tx 채널 닫힘: {e}");
+                    return;
+                }
             }
         }),
     ]
@@ -84,13 +87,6 @@ fn spawn_binance(
     db_tx: Sender<DbEvent>,
 ) -> Vec<JoinHandle<()>> {
     let (stream_tx, mut stream_rx) = mpsc::channel::<StreamData>(100);
-    let (trade_tx, mut trade_rx) = mpsc::channel::<TradeData>(100);
-    let (depth_tx, mut depth_rx) = mpsc::channel::<DepthData>(100);
-    let (book_tx, mut book_rx) = mpsc::channel::<BookTickerData>(100);
-
-    let db_tx_trade = db_tx.clone();
-    let db_tx_depth = db_tx.clone();
-    let db_tx_book = db_tx;
 
     vec![
         tokio::spawn(
@@ -98,32 +94,16 @@ fn spawn_binance(
         ),
         tokio::spawn(async move {
             while let Some(s) = stream_rx.recv().await {
-                match s {
-                    StreamData::Trade(d) => {
-                        let _ = trade_tx.send(d).await;
-                    }
-                    StreamData::Depth(d) => {
-                        let _ = depth_tx.send(d).await;
-                    }
-                    StreamData::BookTicker(d) => {
-                        let _ = book_tx.send(d).await;
-                    }
+                let event = match s {
+                    StreamData::Trade(d) => DbEvent::Trade(d),
+                    StreamData::Depth(d) => DbEvent::Depth(d),
+                    StreamData::BookTicker(d) => DbEvent::BookTicker(d),
+                };
+
+                if let Err(e) = db_tx.send(event).await {
+                    warn!("QuestDB Tx 채널 닫힘: {e}");
+                    return;
                 }
-            }
-        }),
-        tokio::spawn(async move {
-            while let Some(t) = trade_rx.recv().await {
-                let _ = db_tx_trade.send(DbEvent::Trade(t)).await;
-            }
-        }),
-        tokio::spawn(async move {
-            while let Some(d) = depth_rx.recv().await {
-                let _ = db_tx_depth.send(DbEvent::Depth(d)).await;
-            }
-        }),
-        tokio::spawn(async move {
-            while let Some(b) = book_rx.recv().await {
-                let _ = db_tx_book.send(DbEvent::BookTicker(b)).await;
             }
         }),
     ]
