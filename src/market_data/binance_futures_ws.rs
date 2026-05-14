@@ -1,18 +1,22 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{sync::mpsc::Sender, time::sleep};
+use tokio::time::error::Elapsed;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{Message, client::IntoClientRequest},
 };
+use tokio_tungstenite::tungstenite::Error;
 use tracing::{error, warn};
 
 use crate::{
     BinanceConfig, BinanceRuntimeConfig,
     dtos::{StreamData, StreamEnvelope},
 };
+
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn subscribe_to_binance_futures_ws(
     cfg: BinanceConfig,
@@ -36,10 +40,15 @@ pub async fn subscribe_to_binance_futures_ws(
 async fn stream(url: &str, tx: &Sender<StreamData>) -> Result<()> {
     let request = url.into_client_request().context("잘못된 URL")?;
     let (ws_stream, _) = connect_async(request).await.context("연결 실패")?;
-
     let (mut write, mut read) = ws_stream.split();
 
-    while let Some(msg) = read.next().await {
+    loop {
+        let msg = match tokio::time::timeout(READ_TIMEOUT, read.next()).await {
+            Ok(Some(m)) => m,
+            Ok(None) => return Err(anyhow!("WS 스트림 종료")),
+            Err(_) => return Err(anyhow!("WS 타임아웃 {}s", READ_TIMEOUT.as_secs())),
+        };
+
         match msg {
             Ok(Message::Text(text)) => {
                 match serde_json::from_str::<StreamEnvelope>(&text) {
@@ -65,6 +74,4 @@ async fn stream(url: &str, tx: &Sender<StreamData>) -> Result<()> {
             _ => (),
         }
     }
-
-    Err(anyhow::anyhow!("WS 스트림 종료"))
 }
