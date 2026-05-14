@@ -4,6 +4,7 @@ use std::f64;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{MissedTickBehavior, interval};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::dtos::{BookTickerData, DepthData, FngData, TradeData};
@@ -19,8 +20,8 @@ const BATCH_MAX_ROWS: usize = 5_000;
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
 const BUFFER_MAX_BYTES: usize = 1024 * 1024;
 
-pub async fn run(conf: &str, mut rx: Receiver<DbEvent>) {
-    let mut sender = match Sender::from_conf(conf) {
+pub async fn run(url: &str, mut rx: Receiver<DbEvent>, token: CancellationToken) {
+    let mut sender = match Sender::from_conf(url) {
         Ok(s) => s,
         Err(e) => {
             error!("QuestDB 초기 연결 실패: {e}");
@@ -38,7 +39,7 @@ pub async fn run(conf: &str, mut rx: Receiver<DbEvent>) {
         tokio::select! {
             maybe = rx.recv() => {
                 let Some(event) = maybe else {
-                    flush_if_any(&mut sender, &mut buf, &mut rows, conf, "shutdown");
+                    flush_if_any(&mut sender, &mut buf, &mut rows, url, "shutdown");
                     info!("DB writer 종료");
                     return;
                 };
@@ -60,17 +61,22 @@ pub async fn run(conf: &str, mut rx: Receiver<DbEvent>) {
                 }
 
                 if rows <= BATCH_MAX_ROWS || buf.len() >= BUFFER_MAX_BYTES {
-                    flush_if_any(&mut sender, &mut buf, &mut rows, conf, "size");
+                    flush_if_any(&mut sender, &mut buf, &mut rows, url, "size");
                 }
             }
             _ = ticker.tick() => {
-                flush_if_any(&mut sender, &mut buf, &mut rows, conf, "tick");
+                flush_if_any(&mut sender, &mut buf, &mut rows, url, "tick");
+            }
+            _ = token.cancelled() => {
+                flush_if_any(&mut sender, &mut buf, &mut rows, url, "shutdown");
+                info!("QuestDB writer 종료");
+                return;
             }
         }
     }
 }
 
-fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, conf: &str, reason: &str) {
+fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &str, reason: &str) {
     if *rows == 0 {
         return;
     }
@@ -81,10 +87,10 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, conf: &
             error!("QuestDB flush 실패 (reason={reason}, rows={rows}): {e}, 재연결 시도");
             buf.clear();
             *rows = 0;
-            match Sender::from_conf(conf) {
+            match Sender::from_conf(url) {
                 Ok(new) => {
                     *sender = new;
-                    info!("QeustDB 재연결 성공");
+                    info!("QuestDB 재연결 성공");
                 }
                 Err(e2) => error!("QuestDB 재연결 실패: {e2}"),
             }
