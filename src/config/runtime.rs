@@ -33,21 +33,21 @@ impl Default for FngRuntimeConfig {
 }
 
 impl RuntimeConfig {
-    pub fn from_rows(rows: &[(String, String)]) -> Self {
+    pub fn from_rows(rows: &[(String, String, String)]) -> Self {
         let mut cfg = Self::default();
-        for (key, value) in rows {
-            match key.as_str() {
-                "binance.reconnect_delay_sec" => {
+        for (cfg_type, key, value) in rows {
+            match (cfg_type.as_str(), key.as_str()) {
+                ("binance", "reconnect_delay_sec") => {
                     if let Ok(v) = value.parse() {
                         cfg.binance.reconnect_delay_sec = v;
                     }
                 }
-                "fng.fallback_interval_sec" => {
+                ("fng", "fallback_interval_sec") => {
                     if let Ok(v) = value.parse() {
                         cfg.fng.fallback_interval_sec = v;
                     }
                 }
-                "fng.retry_interval_sec" => {
+                ("fng", "retry_interval_sec") => {
                     if let Ok(v) = value.parse() {
                         cfg.fng.retry_interval_sec = v;
                     }

@@ -42,10 +42,10 @@ fn load_symbols(conn: &Connection) -> Result<Vec<SymbolConfig>> {
     Ok(rows)
 }
 
-fn load_runtime_rows(conn: &Connection) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare("SELECT key, value FROM v_config_runtime_current")?;
+fn load_runtime_rows(conn: &Connection) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare("SELECT type, key, value FROM v_config_runtime_current")?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

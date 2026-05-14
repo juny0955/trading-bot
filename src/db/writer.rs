@@ -1,6 +1,8 @@
-use questdb::ingress::{Buffer, TimestampNanos};
+use questdb::ingress::{Buffer, ProtocolVersion, TimestampNanos};
 use rust_decimal::prelude::ToPrimitive;
 use std::f64;
+use tokio::sync::mpsc::Receiver;
+use tracing::error;
 
 use crate::dtos::{BookTickerData, DepthData, FngData, TradeData};
 
@@ -9,6 +11,25 @@ pub enum DbEvent {
     Depth(DepthData),
     BookTicker(BookTickerData),
     Fng(FngData),
+}
+pub async fn run(conf: &str, mut rx: Receiver<DbEvent>) {
+    let mut sender = questdb::ingress::Sender::from_conf(conf).expect("QuestDB 연결 실패");
+
+    let mut buf = Buffer::new(ProtocolVersion::V2);
+    while let Some(event) = rx.recv().await {
+        let result = match &event {
+            DbEvent::Trade(d) => append_trade(&mut buf, d),
+            DbEvent::Depth(d) => append_depth(&mut buf, d),
+            DbEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
+            DbEvent::Fng(d) => append_fng(&mut buf, d),
+        };
+
+        if result.is_ok()
+            && let Err(e) = sender.flush(&mut buf)
+        {
+            error!("QuestDB flush 실패: {e}");
+        }
+    }
 }
 
 fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
