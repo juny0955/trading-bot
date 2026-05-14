@@ -7,7 +7,7 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{Message, client::IntoClientRequest},
 };
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{
     BinanceConfig, BinanceRuntimeConfig,
@@ -42,10 +42,17 @@ async fn stream(url: &str, tx: &Sender<StreamData>) -> Result<()> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(envelope) = serde_json::from_str::<StreamEnvelope>(&text)
-                    && tx.send(envelope.data).await.is_err()
-                {
-                    return Ok(());
+                match serde_json::from_str::<StreamEnvelope>(&text) {
+                    Ok(envelope) => {
+                        if let Err(e) = tx.send(envelope.data).await {
+                            warn!("바이낸스 Stream 채널 닫힘: {e}");
+                            return Ok(())
+                        }
+                    }
+                    Err(e) => {
+                        let preview: String = text.chars().take(200).collect();
+                        warn!("payload 파싱 실패: {e}, raw={preview}");
+                    }
                 }
             }
             Ok(Message::Ping(payload)) => {
