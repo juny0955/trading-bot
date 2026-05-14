@@ -1,8 +1,10 @@
-use questdb::ingress::{Buffer, ProtocolVersion, TimestampNanos};
+use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
 use rust_decimal::prelude::ToPrimitive;
 use std::f64;
+use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
-use tracing::error;
+use tokio::time::{MissedTickBehavior, interval};
+use tracing::{error, info, warn};
 
 use crate::dtos::{BookTickerData, DepthData, FngData, TradeData};
 
@@ -12,22 +14,80 @@ pub enum DbEvent {
     BookTicker(BookTickerData),
     Fng(FngData),
 }
+
+const BATCH_MAX_ROWS: usize = 5_000;
+const BATCH_INTERVAL: Duration = Duration::from_millis(100);
+const BUFFER_MAX_BYTES: usize = 1024 * 1024;
+
 pub async fn run(conf: &str, mut rx: Receiver<DbEvent>) {
-    let mut sender = questdb::ingress::Sender::from_conf(conf).expect("QuestDB 연결 실패");
+    let mut sender = match Sender::from_conf(conf) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("QuestDB 초기 연결 실패: {e}");
+            return;
+        }
+    };
 
     let mut buf = Buffer::new(ProtocolVersion::V2);
-    while let Some(event) = rx.recv().await {
-        let result = match &event {
-            DbEvent::Trade(d) => append_trade(&mut buf, d),
-            DbEvent::Depth(d) => append_depth(&mut buf, d),
-            DbEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
-            DbEvent::Fng(d) => append_fng(&mut buf, d),
-        };
+    let mut rows: usize = 0;
 
-        if result.is_ok()
-            && let Err(e) = sender.flush(&mut buf)
-        {
-            error!("QuestDB flush 실패: {e}");
+    let mut ticker = interval(BATCH_INTERVAL);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            maybe = rx.recv() => {
+                let Some(event) = maybe else {
+                    flush_if_any(&mut sender, &mut buf, &mut rows, conf, "shutdown");
+                    info!("DB writer 종료");
+                    return;
+                };
+
+                let result = match &event {
+                     DbEvent::Trade(d) => append_trade(&mut buf, d),
+                    DbEvent::Depth(d) => append_depth(&mut buf, d),
+                    DbEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
+                    DbEvent::Fng(d) => append_fng(&mut buf, d),
+                };
+
+                match result {
+                    Ok(()) => rows += 1,
+                    Err(e) => {
+                        warn!("append 실패 누적 buffer 폐기: {e}");
+                        buf.clear();
+                        rows = 0;
+                    }
+                }
+
+                if rows <= BATCH_MAX_ROWS || buf.len() >= BUFFER_MAX_BYTES {
+                    flush_if_any(&mut sender, &mut buf, &mut rows, conf, "size");
+                }
+            }
+            _ = ticker.tick() => {
+                flush_if_any(&mut sender, &mut buf, &mut rows, conf, "tick");
+            }
+        }
+    }
+}
+
+fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, conf: &str, reason: &str) {
+    if *rows == 0 {
+        return;
+    }
+
+    match sender.flush(buf) {
+        Ok(()) => *rows = 0,
+        Err(e) => {
+            error!("QuestDB flush 실패 (reason={reason}, rows={rows}): {e}, 재연결 시도");
+            buf.clear();
+            *rows = 0;
+            match Sender::from_conf(conf) {
+                Ok(new) => {
+                    *sender = new;
+                    info!("QeustDB 재연결 성공");
+                }
+                Err(e2) => error!("QuestDB 재연결 실패: {e2}"),
+            }
         }
     }
 }
