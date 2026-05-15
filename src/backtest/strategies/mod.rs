@@ -1,8 +1,8 @@
 mod ema_cross;
 
+use crate::backtest::strategies::ema_cross::EmaCross;
 use crate::backtest::strategy::Strategy;
 use anyhow::bail;
-use crate::backtest::strategies::ema_cross::EmaCross;
 
 pub fn create_strategy(
     name: &str,

@@ -5,6 +5,7 @@ use crate::backtest::types::{BacktestOrder, Bar, DepthSnapshot, Event, Side};
 use anyhow::Result;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
+use std::mem;
 use tracing::info;
 
 pub struct BacktestConfig {
@@ -84,7 +85,7 @@ pub async fn run(
         // (1) 직전 tick의 pending orders 체결 — look-ahead 방지
         let buy_price = pick_buy_price(ev, &last_depth, ts, depth_fresh_ns);
         let sell_price = pick_sell_price(ev, &last_depth, ts, depth_fresh_ns);
-        let drained: Vec<BacktestOrder> = pending.drain(..).collect();
+        let drained: Vec<BacktestOrder> = mem::take(&mut pending);
         for order in drained {
             let price = match &order {
                 BacktestOrder::Market {
@@ -234,7 +235,8 @@ fn pick_buy_price(
     fresh_ns: i64,
 ) -> Decimal {
     if let Some(d) = last_depth
-        && now_ns - d.ts_ns <= fresh_ns {
+        && now_ns - d.ts_ns <= fresh_ns
+    {
         return d.ask1_price;
     }
     match ev {
@@ -250,7 +252,8 @@ fn pick_sell_price(
     fresh_ns: i64,
 ) -> Decimal {
     if let Some(d) = last_depth
-        && now_ns - d.ts_ns <= fresh_ns {
+        && now_ns - d.ts_ns <= fresh_ns
+    {
         return d.bid1_price;
     }
     match ev {
@@ -286,7 +289,10 @@ mod tests {
 
     #[test]
     fn merge_orders_by_ts() {
-        let bars = vec![mk_bar(1, dec!(100), dec!(101)), mk_bar(3, dec!(102), dec!(103))];
+        let bars = vec![
+            mk_bar(1, dec!(100), dec!(101)),
+            mk_bar(3, dec!(102), dec!(103)),
+        ];
         let depths = vec![
             DepthSnapshot {
                 symbol: "X".into(),

@@ -58,11 +58,11 @@ pub struct BookTickerData {
     #[serde(rename = "b")]
     pub bid_price: Decimal,
     #[serde(rename = "B")]
-    pub bid_quantity: String,
+    pub bid_quantity: Decimal,
     #[serde(rename = "a")]
     pub ask_price: Decimal,
     #[serde(rename = "A")]
-    pub ask_quantity: String,
+    pub ask_quantity: Decimal,
     #[serde(rename = "E")]
     pub event_time: u64,
 }

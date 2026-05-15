@@ -44,8 +44,8 @@ async fn main() -> Result<()> {
     app::setup();
     let args = Args::parse();
 
-    let rest_url = std::env::var("QUESTDB_REST_URL")
-        .unwrap_or_else(|_| "http://localhost:9000".to_string());
+    let rest_url =
+        std::env::var("QUESTDB_REST_URL").unwrap_or_else(|_| "http://localhost:9000".to_string());
     info!(rest_url = %rest_url, "QuestDB REST 사용");
 
     let src = QuestDbRestDataSource::new(rest_url);

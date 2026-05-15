@@ -23,4 +23,3 @@ pub trait Strategy {
     fn on_depth(&mut self, _snap: &DepthSnapshot, _ctx: &mut Context) {}
     fn on_finish(&mut self, _ctx: &mut Context) {}
 }
-

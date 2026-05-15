@@ -1224,6 +1224,7 @@ dependencies = [
  "questdb-confstr",
  "rand 0.9.4",
  "ring",
+ "rust_decimal",
  "rustls",
  "rustls-pki-types",
  "ryu",

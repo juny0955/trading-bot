@@ -40,12 +40,7 @@ impl Portfolio {
         }
     }
 
-    pub fn execute(
-        &mut self,
-        order: &BacktestOrder,
-        price: Decimal,
-        ts_ns: i64,
-    ) -> Vec<Fill> {
+    pub fn execute(&mut self, order: &BacktestOrder, price: Decimal, ts_ns: i64) -> Vec<Fill> {
         match order {
             BacktestOrder::Close => self.close_at(price, ts_ns).into_iter().collect(),
             BacktestOrder::Market { side, qty } => {

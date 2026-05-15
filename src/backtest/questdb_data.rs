@@ -1,12 +1,12 @@
-use std::str::FromStr;
-use anyhow::{anyhow, Context, Result};
+use crate::backtest::data::{BarQuery, DepthQuery, MarketDataSource};
+use crate::backtest::types::{Bar, DepthSnapshot};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use crate::backtest::data::{BarQuery, DepthQuery, MarketDataSource};
-use crate::backtest::types::{Bar, DepthSnapshot};
+use std::str::FromStr;
 
 pub struct QuestDbRestDataSource {
     base_url: String,
@@ -15,7 +15,10 @@ pub struct QuestDbRestDataSource {
 
 impl QuestDbRestDataSource {
     pub fn new(base_url: impl Into<String>) -> Self {
-        Self { base_url: base_url.into(), client: Client::new() }
+        Self {
+            base_url: base_url.into(),
+            client: Client::new(),
+        }
     }
 }
 
@@ -35,7 +38,10 @@ impl MarketDataSource for QuestDbRestDataSource {
             FROM trades \
             WHERE symbol = '{sym}' AND timestamp >= '{from}' AND timestamp < '{to}' \
             SAMPLE BY {interval} ALIGN TO CALENDAR",
-            sym = q.symbol, from = from_iso, to = to_iso, interval = q.interval,
+            sym = q.symbol,
+            from = from_iso,
+            to = to_iso,
+            interval = q.interval,
         );
 
         let resp = self.exec(&sql).await?;
@@ -47,7 +53,15 @@ impl MarketDataSource for QuestDbRestDataSource {
             let l = json_to_decimal(&row[3])?;
             let c = json_to_decimal(&row[4])?;
             let v = json_to_decimal(&row[5])?;
-            out.push(Bar { symbol: q.symbol.clone(), ts_ns: ts, open: o, high: h, low: l, close: c, volume: v });
+            out.push(Bar {
+                symbol: q.symbol.clone(),
+                ts_ns: ts,
+                open: o,
+                high: h,
+                low: l,
+                close: c,
+                volume: v,
+            });
         }
         Ok(out)
     }
@@ -61,7 +75,10 @@ impl MarketDataSource for QuestDbRestDataSource {
               FROM depth \
               WHERE symbol = '{sym}' AND timestamp >= '{from}' AND timestamp < '{to}' \
               SAMPLE BY {every} ALIGN TO CALENDAR",
-            sym = q.symbol, from = from_iso, to = to_iso, every = q.every,
+            sym = q.symbol,
+            from = from_iso,
+            to = to_iso,
+            every = q.every,
         );
 
         let resp = self.exec(&sql).await?;
@@ -72,7 +89,14 @@ impl MarketDataSource for QuestDbRestDataSource {
             let bq = json_to_decimal(&row[2])?;
             let ap = json_to_decimal(&row[3])?;
             let aq = json_to_decimal(&row[4])?;
-            out.push(DepthSnapshot { symbol: q.symbol.clone(), ts_ns: ts, bid1_price: bp, bid1_qty: bq, ask1_price: ap, ask1_qty: aq });
+            out.push(DepthSnapshot {
+                symbol: q.symbol.clone(),
+                ts_ns: ts,
+                bid1_price: bp,
+                bid1_qty: bq,
+                ask1_price: ap,
+                ask1_qty: aq,
+            });
         }
         Ok(out)
     }
@@ -80,17 +104,23 @@ impl MarketDataSource for QuestDbRestDataSource {
 
 impl QuestDbRestDataSource {
     async fn exec(&self, sql: &str) -> Result<ExecResponse> {
-        let url = reqwest::Url::parse_with_params(
-            &format!("{}/exec", self.base_url),
-            &[("query", sql)],
-        )
-        .context("questdb url build 실패")?;
-        let resp = self.client.get(url).send().await
+        let url =
+            reqwest::Url::parse_with_params(&format!("{}/exec", self.base_url), &[("query", sql)])
+                .context("questdb url build 실패")?;
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
             .context("questdb /exec 요청 실패")?;
         if !resp.status().is_success() {
-            return Err(anyhow!("questdb /exec status={}, body={}", resp.status(), resp.text().await.unwrap_or_default()));
+            return Err(anyhow!(
+                "questdb /exec status={}, body={}",
+                resp.status(),
+                resp.text().await.unwrap_or_default()
+            ));
         }
-        Ok(resp.json().await.context("questdb json 파싱 실패")?)
+        resp.json().await.context("questdb json 파싱 실패")
     }
 }
 
@@ -100,8 +130,9 @@ fn ns_to_iso(ns: i64) -> String {
 }
 
 fn parse_iso_to_ns(s: &str) -> Result<i64> {
-    Ok(DateTime::parse_from_rfc3339(s)?.timestamp_nanos_opt()
-        .ok_or_else(|| anyhow!("ts overflow"))?)
+    DateTime::parse_from_rfc3339(s)?
+        .timestamp_nanos_opt()
+        .ok_or_else(|| anyhow!("ts overflow"))
 }
 
 fn json_to_decimal(v: &serde_json::Value) -> Result<Decimal> {
