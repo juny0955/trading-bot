@@ -20,10 +20,10 @@ pub struct ClosedTrade {
 pub struct Portfolio {
     pub initial_equity: Decimal,
     pub equity: Decimal,
-    pub position: Position,
-    pub realized_pnl: Decimal,
-    pub unrealized_pnl: Decimal,
-    pub fee_bps: Decimal,
+    pub(crate) position: Position,
+    pub(crate) realized_pnl: Decimal,
+    pub(crate) unrealized_pnl: Decimal,
+    pub(crate) fee_bps: Decimal,
     pub closed_trades: Vec<ClosedTrade>,
 }
 

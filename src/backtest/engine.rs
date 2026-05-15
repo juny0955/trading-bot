@@ -5,7 +5,6 @@ use crate::backtest::types::{BacktestOrder, Bar, DepthSnapshot, Event, Side};
 use anyhow::Result;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
-use std::mem;
 use tracing::info;
 
 pub struct BacktestConfig {
@@ -66,13 +65,13 @@ pub async fn run(
     let mut portfolio = Portfolio::new(cfg.initial_equity, cfg.fee_bps);
     let mut pending: Vec<BacktestOrder> = Vec::new();
     let mut equity_curve: Vec<EquityPoint> = Vec::with_capacity(events.len());
-    let mut last_depth: Option<DepthSnapshot> = None;
+    let mut last_depth: Option<&DepthSnapshot> = None;
     let depth_fresh_ns = cfg.depth_freshness_sec.saturating_mul(1_000_000_000);
 
     {
         let mut ctx = Context {
             now_ns: events[0].ts_ns(),
-            position: portfolio.position.clone(),
+            position: &portfolio.position,
             equity: portfolio.equity,
             pending: &mut pending,
         };
@@ -83,10 +82,9 @@ pub async fn run(
         let ts = ev.ts_ns();
 
         // (1) 직전 tick의 pending orders 체결 — look-ahead 방지
-        let buy_price = pick_buy_price(ev, &last_depth, ts, depth_fresh_ns);
-        let sell_price = pick_sell_price(ev, &last_depth, ts, depth_fresh_ns);
-        let drained: Vec<BacktestOrder> = mem::take(&mut pending);
-        for order in drained {
+        let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, Side::Long);
+        let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, Side::Short);
+        for order in pending.drain(..) {
             let price = match &order {
                 BacktestOrder::Market {
                     side: Side::Long, ..
@@ -116,7 +114,7 @@ pub async fn run(
         // (3) strategy hook
         let mut ctx = Context {
             now_ns: ts,
-            position: portfolio.position.clone(),
+            position: &portfolio.position,
             equity: portfolio.equity,
             pending: &mut pending,
         };
@@ -124,17 +122,14 @@ pub async fn run(
             Event::Bar(b) => strategy.on_bar(b, &mut ctx),
             Event::Depth(d) => {
                 strategy.on_depth(d, &mut ctx);
-                last_depth = Some(d.clone());
+                last_depth = Some(d);
             }
-        }
-        if let Event::Bar(_) = ev {
-            // depth는 마지막 이벤트가 bar여도 직전 depth를 유지
         }
     }
 
     // 종료 시 잔여 포지션 시장가 청산 (마지막 이벤트 가격으로)
     if portfolio.position.side.is_some() {
-        let last = events.last().unwrap();
+        let last = &events[events.len() - 1];
         let close_price = event_mark_price(last);
         portfolio.execute(&BacktestOrder::Close, close_price, last.ts_ns());
         // equity_curve 마지막 행 갱신
@@ -145,9 +140,10 @@ pub async fn run(
     }
 
     {
+        let last = &events[events.len() - 1];
         let mut ctx = Context {
-            now_ns: events.last().unwrap().ts_ns(),
-            position: portfolio.position.clone(),
+            now_ns: last.ts_ns(),
+            position: &portfolio.position,
             equity: portfolio.equity,
             pending: &mut pending,
         };
@@ -162,103 +158,37 @@ pub async fn run(
 
 fn merge_events(bars: Vec<Bar>, depths: Vec<DepthSnapshot>) -> Vec<Event> {
     let mut out = Vec::with_capacity(bars.len() + depths.len());
-    let mut bi = 0;
-    let mut di = 0;
-    let mut bars = bars;
-    let mut depths = depths;
-    while bi < bars.len() && di < depths.len() {
-        if bars[bi].ts_ns <= depths[di].ts_ns {
-            out.push(Event::Bar(std::mem::replace(
-                &mut bars[bi],
-                Bar {
-                    symbol: String::new(),
-                    ts_ns: 0,
-                    open: Decimal::zero(),
-                    high: Decimal::zero(),
-                    low: Decimal::zero(),
-                    close: Decimal::zero(),
-                    volume: Decimal::zero(),
-                },
-            )));
-            bi += 1;
-        } else {
-            out.push(Event::Depth(std::mem::replace(
-                &mut depths[di],
-                DepthSnapshot {
-                    symbol: String::new(),
-                    ts_ns: 0,
-                    bid1_price: Decimal::zero(),
-                    bid1_qty: Decimal::zero(),
-                    ask1_price: Decimal::zero(),
-                    ask1_qty: Decimal::zero(),
-                },
-            )));
-            di += 1;
+    let mut bars = bars.into_iter().peekable();
+    let mut depths = depths.into_iter().peekable();
+    loop {
+        match (bars.peek().map(|b| b.ts_ns), depths.peek().map(|d| d.ts_ns)) {
+            (Some(bt), Some(dt)) if bt <= dt => out.push(Event::Bar(bars.next().unwrap())),
+            (Some(_), Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
+            (Some(_), None) => out.push(Event::Bar(bars.next().unwrap())),
+            (None, Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
+            (None, None) => break,
         }
-    }
-    while bi < bars.len() {
-        out.push(Event::Bar(std::mem::replace(
-            &mut bars[bi],
-            Bar {
-                symbol: String::new(),
-                ts_ns: 0,
-                open: Decimal::zero(),
-                high: Decimal::zero(),
-                low: Decimal::zero(),
-                close: Decimal::zero(),
-                volume: Decimal::zero(),
-            },
-        )));
-        bi += 1;
-    }
-    while di < depths.len() {
-        out.push(Event::Depth(std::mem::replace(
-            &mut depths[di],
-            DepthSnapshot {
-                symbol: String::new(),
-                ts_ns: 0,
-                bid1_price: Decimal::zero(),
-                bid1_qty: Decimal::zero(),
-                ask1_price: Decimal::zero(),
-                ask1_qty: Decimal::zero(),
-            },
-        )));
-        di += 1;
     }
     out
 }
 
-fn pick_buy_price(
+fn pick_price(
     ev: &Event,
-    last_depth: &Option<DepthSnapshot>,
+    last_depth: Option<&DepthSnapshot>,
     now_ns: i64,
     fresh_ns: i64,
+    side: Side,
 ) -> Decimal {
-    if let Some(d) = last_depth
-        && now_ns - d.ts_ns <= fresh_ns
-    {
-        return d.ask1_price;
+    let select = |d: &DepthSnapshot| match side {
+        Side::Long => d.ask1_price,
+        Side::Short => d.bid1_price,
+    };
+    if let Some(d) = last_depth.filter(|d| now_ns - d.ts_ns <= fresh_ns) {
+        return select(d);
     }
     match ev {
         Event::Bar(b) => b.open,
-        Event::Depth(d) => d.ask1_price,
-    }
-}
-
-fn pick_sell_price(
-    ev: &Event,
-    last_depth: &Option<DepthSnapshot>,
-    now_ns: i64,
-    fresh_ns: i64,
-) -> Decimal {
-    if let Some(d) = last_depth
-        && now_ns - d.ts_ns <= fresh_ns
-    {
-        return d.bid1_price;
-    }
-    match ev {
-        Event::Bar(b) => b.open,
-        Event::Depth(d) => d.bid1_price,
+        Event::Depth(d) => select(d),
     }
 }
 

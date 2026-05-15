@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 
 pub struct Context<'a> {
     pub now_ns: i64,
-    pub position: Position,
+    pub position: &'a Position,
     pub equity: Decimal,
     pub(crate) pending: &'a mut Vec<BacktestOrder>,
 }

@@ -2,6 +2,7 @@ use crate::backtest::strategy::{Context, Strategy};
 use crate::backtest::types::{Bar, Side};
 use anyhow::Result;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -24,6 +25,13 @@ pub struct EmaCross {
 impl EmaCross {
     pub fn from_params(v: &serde_json::Value) -> Result<Self> {
         let p: Params = serde_json::from_value(v.clone())?;
+        anyhow::ensure!(
+            p.fast < p.slow,
+            "fast({}) must be < slow({})",
+            p.fast,
+            p.slow
+        );
+        anyhow::ensure!(p.qty > 0.0, "qty must be positive");
         Ok(Self {
             fast_n: p.fast,
             slow_n: p.slow,
@@ -38,7 +46,7 @@ impl EmaCross {
 
 impl Strategy for EmaCross {
     fn on_bar(&mut self, bar: &Bar, ctx: &mut Context) {
-        let price = bar.close.to_string().parse::<f64>().unwrap_or(0.0);
+        let price = bar.close.to_f64().unwrap_or(0.0);
         let kf = 2.0 / (self.fast_n as f64 + 1.0);
         let ks = 2.0 / (self.slow_n as f64 + 1.0);
         self.fast_ema = Some(self.fast_ema.map_or(price, |e| e + kf * (price - e)));
