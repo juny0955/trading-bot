@@ -53,7 +53,7 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-fn setup() {
+pub fn setup() {
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Failed to install crypto provider");
