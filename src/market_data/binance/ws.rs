@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::config::{BinanceConfig, BinanceRuntimeConfig};
-use crate::market_data::dtos::{StreamData, StreamEnvelope};
+use crate::market_data::binance::dto::{StreamData, StreamEnvelope};
 use anyhow::{Context, Result, anyhow};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{sync::mpsc::Sender, time::sleep};

@@ -5,7 +5,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 pub fn init_db() -> Result<Connection> {
-    let conn = Connection::open("config.db")?;
+    let conn = Connection::open("./data/config.db")?;
     conn.execute_batch(include_str!("../../migrations/config_init.sql"))?;
     Ok(conn)
 }

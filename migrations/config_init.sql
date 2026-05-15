@@ -13,12 +13,12 @@ CREATE TABLE IF NOT EXISTS config_streams (
     ts          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
- CREATE TABLE IF NOT EXISTS config_strategy (
-     key   TEXT NOT NULL,
-     value REAL NOT NULL,
-     memo  TEXT,
-     ts    TEXT NOT NULL DEFAULT (datetime('now'))
- );
+CREATE TABLE IF NOT EXISTS config_strategy (
+    key   TEXT NOT NULL,
+    value REAL NOT NULL,
+    memo  TEXT,
+    ts    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS config_runtime (
     type        TEXT NOT NULL,
@@ -42,16 +42,16 @@ FROM (
     FROM config_strategy
 ) WHERE rn = 1;
 
- CREATE VIEW IF NOT EXISTS v_config_runtime_current AS
- SELECT type, key, value, memo, ts
- FROM (
-     SELECT *, ROW_NUMBER() OVER (PARTITION BY type, key ORDER BY ts DESC) AS rn
-     FROM config_runtime
- ) WHERE rn = 1;
+CREATE VIEW IF NOT EXISTS v_config_runtime_current AS
+SELECT type, key, value, memo, ts
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY type, key ORDER BY ts DESC) AS rn
+    FROM config_runtime
+) WHERE rn = 1;
 
- CREATE VIEW IF NOT EXISTS v_config_streams_current AS
- SELECT name, suffix, enabled, memo, ts
- FROM (
-     SELECT *, ROW_NUMBER() OVER (PARTITION BY name ORDER BY ts DESC) AS rn
-     FROM config_streams
- ) WHERE rn = 1;
+CREATE VIEW IF NOT EXISTS v_config_streams_current AS
+SELECT name, suffix, enabled, memo, ts
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY name ORDER BY ts DESC) AS rn
+    FROM config_streams
+) WHERE rn = 1;

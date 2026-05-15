@@ -1,3 +1,6 @@
+use crate::market_data::alternative::dto::FngData;
+use crate::market_data::binance::dto::{BookTickerData, DepthData, TradeData};
+use crate::storage::event::StorageEvent;
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
 use rust_decimal::prelude::ToPrimitive;
 use std::f64;
@@ -7,20 +10,11 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::market_data::dtos::{BookTickerData, DepthData, FngData, TradeData};
-
-pub enum DbEvent {
-    Trade(TradeData),
-    Depth(DepthData),
-    BookTicker(BookTickerData),
-    Fng(FngData),
-}
-
 const BATCH_MAX_ROWS: usize = 5_000;
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
 const BUFFER_MAX_BYTES: usize = 1024 * 1024;
 
-pub async fn run(url: &str, mut rx: Receiver<DbEvent>, token: CancellationToken) {
+pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationToken) {
     let mut sender = match Sender::from_conf(url) {
         Ok(s) => s,
         Err(e) => {
@@ -45,10 +39,10 @@ pub async fn run(url: &str, mut rx: Receiver<DbEvent>, token: CancellationToken)
                 };
 
                 let result = match &event {
-                     DbEvent::Trade(d) => append_trade(&mut buf, d),
-                    DbEvent::Depth(d) => append_depth(&mut buf, d),
-                    DbEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
-                    DbEvent::Fng(d) => append_fng(&mut buf, d),
+                    StorageEvent::Trade(d) => append_trade(&mut buf, d),
+                    StorageEvent::Depth(d) => append_depth(&mut buf, d),
+                    StorageEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
+                    StorageEvent::Fng(d) => append_fng(&mut buf, d),
                 };
 
                 match result {

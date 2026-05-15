@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::config::FngRuntimeConfig;
-use crate::market_data::dtos::{FngData, FngResponse};
+use crate::market_data::alternative::dto::{FngData, FngResponse};
 use tokio::{sync::mpsc::Sender, time::sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
