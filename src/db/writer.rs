@@ -7,7 +7,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::dtos::{BookTickerData, DepthData, FngData, TradeData};
+use crate::market_data::dtos::{BookTickerData, DepthData, FngData, TradeData};
 
 pub enum DbEvent {
     Trade(TradeData),
@@ -99,10 +99,18 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
 }
 
 fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
+    let (Some(price), Some(qty)) = (d.price.to_f64(), d.quantity.to_f64()) else {
+        warn!(
+            "trade decimal -> f64 실패: symbol={}, price={}, qty={}",
+            d.symbol, d.price, d.quantity
+        );
+        return Ok(());
+    };
+
     buf.table("trades")?
         .symbol("symbol", &d.symbol)?
-        .column_f64("price", d.price.to_f64().unwrap_or(f64::NAN))?
-        .column_f64("quantity", d.quantity.to_f64().unwrap_or(f64::NAN))?
+        .column_f64("price", price)?
+        .column_f64("quantity", qty)?
         .column_bool("buyer_is_market_maker", d.buyer_is_market_maker)?
         .at(TimestampNanos::new(d.time as i64 * 1_000_000))?;
 
@@ -110,33 +118,62 @@ fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
 }
 
 fn append_depth(buf: &mut Buffer, d: &DepthData) -> questdb::Result<()> {
+    let mut bids = [(0.0_f64, 0.0_f64); 10];
+    let mut asks = [(0.0_f64, 0.0_f64); 10];
+
+    for i in 0..10 {
+        let Some(bid) = d.bids.get(i) else {
+            warn!(
+                "depth level 부족: symbol={}, side=bid, level={}, len={}",
+                d.symbol,
+                i + 1,
+                d.bids.len()
+            );
+            return Ok(());
+        };
+        let (Some(bid_price), Some(bid_qty)) = (bid.0.to_f64(), bid.1.to_f64()) else {
+            warn!(
+                "depth decimal -> f64 실패: symbol={}, side=bid, level={}",
+                d.symbol,
+                i + 1
+            );
+            return Ok(());
+        };
+        bids[i] = (bid_price, bid_qty);
+
+        let Some(ask) = d.asks.get(i) else {
+            warn!(
+                "depth level 부족: symbol={}, side=ask, level={}, len={}",
+                d.symbol,
+                i + 1,
+                d.asks.len()
+            );
+            return Ok(());
+        };
+        let (Some(ask_price), Some(ask_qty)) = (ask.0.to_f64(), ask.1.to_f64()) else {
+            warn!(
+                "depth decimal -> f64 실패: symbol={}, side=ask, level={}",
+                d.symbol,
+                i + 1
+            );
+            return Ok(());
+        };
+        asks[i] = (ask_price, ask_qty);
+    }
+
     let row = buf.table("depth")?;
     row.symbol("symbol", &d.symbol)?
         .column_i64("first_update_id", d.first_update_id as i64)?
         .column_i64("last_update_id", d.last_update_id as i64)?;
 
-    // 매수(Bids) 10단계 처리
     for i in 0..10 {
-        let (price, qty) = d
-            .bids
-            .get(i)
-            .map(|p| (p.0.to_f64().unwrap_or(0.0), p.1.to_f64().unwrap_or(0.0)))
-            .unwrap_or((0.0, 0.0));
+        let (bid_price, bid_qty) = bids[i];
+        let (ask_price, ask_qty) = asks[i];
 
-        row.column_f64(format!("bid{}_price", i + 1).as_str(), price)?
-            .column_f64(format!("bid{}_qty", i + 1).as_str(), qty)?;
-    }
-
-    // 매도(Asks) 10단계 처리
-    for i in 0..10 {
-        let (price, qty) = d
-            .asks
-            .get(i)
-            .map(|p| (p.0.to_f64().unwrap_or(0.0), p.1.to_f64().unwrap_or(0.0)))
-            .unwrap_or((0.0, 0.0));
-
-        row.column_f64(format!("ask{}_price", i + 1).as_str(), price)?
-            .column_f64(format!("ask{}_qty", i + 1).as_str(), qty)?;
+        row.column_f64(format!("bid{}_price", i + 1).as_str(), bid_price)?
+            .column_f64(format!("bid{}_qty", i + 1).as_str(), bid_qty)?
+            .column_f64(format!("ask{}_price", i + 1).as_str(), ask_price)?
+            .column_f64(format!("ask{}_qty", i + 1).as_str(), ask_qty)?;
     }
 
     row.at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
@@ -144,12 +181,29 @@ fn append_depth(buf: &mut Buffer, d: &DepthData) -> questdb::Result<()> {
 }
 
 fn append_book_ticker(buf: &mut Buffer, d: &BookTickerData) -> questdb::Result<()> {
+    let (Some(bid_price), Some(ask_price)) = (d.bid_price.to_f64(), d.ask_price.to_f64()) else {
+        warn!(
+            "book ticker decimal -> f64 실패: symbol={}, bid_price={}, ask_price={}",
+            d.symbol, d.bid_price, d.ask_price
+        );
+        return Ok(());
+    };
+
+    let (Ok(bid_qty), Ok(ask_qty)) = (d.bid_quantity.parse::<f64>(), d.ask_quantity.parse::<f64>())
+    else {
+        warn!(
+            "book ticker string -> f64 실패: symbol={}, bid_price={}, ask_price={}",
+            d.symbol, d.bid_quantity, d.ask_quantity
+        );
+        return Ok(());
+    };
+
     buf.table("book_ticker")?
         .symbol("symbol", &d.symbol)?
-        .column_f64("bid_price", d.bid_price.to_f64().unwrap_or(f64::NAN))?
-        .column_f64("bid_qty", d.bid_quantity.parse::<f64>().unwrap_or(0.0))?
-        .column_f64("ask_price", d.ask_price.to_f64().unwrap_or(f64::NAN))?
-        .column_f64("ask_qty", d.ask_quantity.parse::<f64>().unwrap_or(0.0))?
+        .column_f64("bid_price", bid_price)?
+        .column_f64("bid_qty", bid_qty)?
+        .column_f64("ask_price", ask_price)?
+        .column_f64("ask_qty", ask_qty)?
         .at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
     Ok(())
 }
