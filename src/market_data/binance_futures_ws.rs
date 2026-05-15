@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::config::{BinanceConfig, BinanceRuntimeConfig};
+use crate::market_data::dtos::{StreamData, StreamEnvelope};
 use anyhow::{Context, Result, anyhow};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{sync::mpsc::Sender, time::sleep};
@@ -9,11 +11,6 @@ use tokio_tungstenite::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
-
-use crate::{
-    BinanceConfig, BinanceRuntimeConfig,
-    dtos::{StreamData, StreamEnvelope},
-};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 

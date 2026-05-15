@@ -1,4 +1,4 @@
-use crate::{BinanceConfig, RuntimeConfig};
+use crate::config::{BinanceConfig, RuntimeConfig};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {

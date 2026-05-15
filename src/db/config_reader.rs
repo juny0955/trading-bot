@@ -1,7 +1,8 @@
+use crate::config::{
+    AppConfig, BinanceConfig, BinanceNet, RuntimeConfig, StreamConfig, SymbolConfig,
+};
 use anyhow::Result;
 use rusqlite::Connection;
-
-use crate::{AppConfig, BinanceConfig, BinanceNet, RuntimeConfig, StreamConfig, SymbolConfig};
 
 pub fn init_db() -> Result<Connection> {
     let conn = Connection::open("config.db")?;

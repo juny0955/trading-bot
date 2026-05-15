@@ -4,15 +4,13 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-use trading_bot::dtos::StreamData;
-use trading_bot::writer::DbEvent;
-use trading_bot::{BinanceConfig, BinanceRuntimeConfig, FngRuntimeConfig, SharedConfig, writer};
-use trading_bot::{
-    alternative_fng::fetch_alternative_fng,
-    binance_futures_ws::subscribe_to_binance_futures_ws,
-    db::config_reader::{init_db, load_config},
-    dtos::FngData,
-};
+use trading_bot::config::{BinanceConfig, BinanceRuntimeConfig, FngRuntimeConfig, SharedConfig};
+use trading_bot::db::config_reader::{init_db, load_config};
+use trading_bot::db::writer;
+use trading_bot::db::writer::DbEvent;
+use trading_bot::market_data::alternative_fng::fetch_alternative_fng;
+use trading_bot::market_data::binance_futures_ws::subscribe_to_binance_futures_ws;
+use trading_bot::market_data::dtos::{FngData, StreamData};
 
 #[tokio::main]
 async fn main() -> Result<()> {
