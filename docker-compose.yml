@@ -12,9 +12,16 @@ services:
       - questdb_data:/var/lib/questdb
     environment:
       - QDB_TELEMETRY_ENABLED=false
+      - QDB_JAVA_OPTS=-Xms128m -Xmx512m
+    deploy:
+      resources:
+        limits:
+          memory: 1200m
 
   postgres:
     image: postgres:17.2-alpine
+    container_name: postgres
+    restart: always
     environment:
       POSTGRES_DB: ${PG_DB}
       POSTGRES_USER: ${PG_USER}
@@ -23,6 +30,23 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=512GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c max_connections=20
+      -c wal_buffers=8MB
+      -c checkpoint_completion_target=0.9
+      -c synchronous_commit=on
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c log_min_duration_statement=500
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
 volumes:
   questdb_data:
