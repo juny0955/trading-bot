@@ -1,5 +1,7 @@
 use crate::market_data::alternative::dto::FngData;
-use crate::market_data::binance::dto::{BookTickerData, DepthData, TradeData};
+use crate::market_data::binance::dto::{
+    BookTickerData, DepthData, KlineData, MarkPriceData, TradeData,
+};
 use crate::storage::event::StorageEvent;
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
 use std::time::Duration;
@@ -40,6 +42,8 @@ pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationT
                     StorageEvent::Trade(d) => append_trade(&mut buf, d),
                     StorageEvent::Depth(d) => append_depth(&mut buf, d),
                     StorageEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
+                    StorageEvent::Kline(d) => append_kline(&mut buf, d),
+                    StorageEvent::MarkPrice(d) => append_mark_price(&mut buf, d),
                     StorageEvent::Fng(d) => append_fng(&mut buf, d),
                 };
 
@@ -52,7 +56,7 @@ pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationT
                     }
                 }
 
-                if rows <= BATCH_MAX_ROWS || buf.len() >= BUFFER_MAX_BYTES {
+                if rows >= BATCH_MAX_ROWS || buf.len() >= BUFFER_MAX_BYTES {
                     flush_if_any(&mut sender, &mut buf, &mut rows, url, "size");
                 }
             }
@@ -91,12 +95,13 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
 }
 
 fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
+    info!("{d:?}");
     buf.table("trades")?
         .symbol("symbol", &d.symbol)?
         .column_dec("price", &d.price)?
         .column_dec("quantity", &d.quantity)?
         .column_bool("buyer_is_market_maker", d.buyer_is_market_maker)?
-        .at(TimestampNanos::new(d.time as i64 * 1_000_000))?;
+        .at(TimestampNanos::new(d.time * 1_000_000))?;
 
     Ok(())
 }
@@ -126,8 +131,8 @@ fn append_depth(buf: &mut Buffer, d: &DepthData) -> questdb::Result<()> {
 
     let row = buf.table("depth")?;
     row.symbol("symbol", &d.symbol)?
-        .column_i64("first_update_id", d.first_update_id as i64)?
-        .column_i64("last_update_id", d.last_update_id as i64)?;
+        .column_i64("first_update_id", d.first_update_id)?
+        .column_i64("last_update_id", d.last_update_id)?;
 
     for i in 0..10 {
         row.column_dec(format!("bid{}_price", i + 1).as_str(), &d.bids[i].0)?
@@ -136,7 +141,7 @@ fn append_depth(buf: &mut Buffer, d: &DepthData) -> questdb::Result<()> {
             .column_dec(format!("ask{}_qty", i + 1).as_str(), &d.asks[i].1)?;
     }
 
-    row.at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
+    row.at(TimestampNanos::new(d.event_time * 1_000_000))?;
     Ok(())
 }
 
@@ -147,7 +152,34 @@ fn append_book_ticker(buf: &mut Buffer, d: &BookTickerData) -> questdb::Result<(
         .column_dec("bid_qty", &d.bid_quantity)?
         .column_dec("ask_price", &d.ask_price)?
         .column_dec("ask_qty", &d.ask_quantity)?
-        .at(TimestampNanos::new(d.event_time as i64 * 1_000_000))?;
+        .at(TimestampNanos::new(d.event_time * 1_000_000))?;
+    Ok(())
+}
+
+fn append_kline(buf: &mut Buffer, d: &KlineData) -> questdb::Result<()> {
+    buf.table("kline")?
+        .symbol("symbol", &d.symbol)?
+        .column_i64("open_time", d.kline.open_time)?
+        .column_dec("open", &d.kline.open)?
+        .column_dec("high", &d.kline.high)?
+        .column_dec("low", &d.kline.low)?
+        .column_dec("close", &d.kline.close)?
+        .column_dec("volume", &d.kline.volume)?
+        .column_dec("quote_volume", &d.kline.quote_volume)?
+        .column_i64("num_trades", d.kline.num_trades)?
+        .column_bool("is_closed", d.kline.is_closed)?
+        .at(TimestampNanos::new(d.event_time * 1_000_000))?;
+    Ok(())
+}
+
+fn append_mark_price(buf: &mut Buffer, d: &MarkPriceData) -> questdb::Result<()> {
+    buf.table("mark_price")?
+        .symbol("symbol", &d.symbol)?
+        .column_dec("mark_price", &d.mark_price)?
+        .column_dec("index_price", &d.index_price)?
+        .column_dec("funding_rate", &d.funding_rate)?
+        .column_i64("next_funding_time", d.next_funding_time)?
+        .at(TimestampNanos::new(d.event_time * 1_000_000))?;
     Ok(())
 }
 

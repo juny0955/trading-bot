@@ -1,8 +1,8 @@
 use crate::config::{BinanceConfig, BinanceRuntimeConfig, FngRuntimeConfig, SharedConfig};
 use crate::market_data::alternative::dto::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
+use crate::market_data::binance::data_ws::subscribe_to_binance_futures_ws;
 use crate::market_data::binance::dto::StreamData;
-use crate::market_data::binance::ws::subscribe_to_binance_futures_ws;
 use crate::storage::config_db::{init_db, load_config};
 use crate::storage::event::StorageEvent;
 use crate::storage::questdb::writer;
@@ -109,18 +109,29 @@ fn spawn_binance(
     token: CancellationToken,
 ) -> Vec<JoinHandle<()>> {
     let (stream_tx, mut stream_rx) = mpsc::channel::<StreamData>(100);
+    let mut handles = Vec::new();
 
-    vec![
-        tokio::spawn(async move {
-            subscribe_to_binance_futures_ws(cfg, runtime_cfg, stream_tx, token).await
-        }),
-        tokio::spawn(async move {
-            while let Some(s) = stream_rx.recv().await {
-                if let Err(e) = db_tx.send(s.into()).await {
-                    warn!("QuestDB Tx 채널 닫힘: {e}");
-                    return;
-                }
+    let public_url = cfg.public_ws_url();
+    let rc = runtime_cfg.clone();
+    let stx = stream_tx.clone();
+    let t = token.clone();
+    handles.push(tokio::spawn(async move {
+        subscribe_to_binance_futures_ws(public_url, rc, stx, t).await
+    }));
+
+    let market_url = cfg.market_ws_url();
+    handles.push(tokio::spawn(async move {
+        subscribe_to_binance_futures_ws(market_url, runtime_cfg, stream_tx, token).await
+    }));
+
+    handles.push(tokio::spawn(async move {
+        while let Some(s) = stream_rx.recv().await {
+            if let Err(e) = db_tx.send(s.into()).await {
+                warn!("QuestDB Tx 채널 닫힘: {e}");
+                return;
             }
-        }),
-    ]
+        }
+    }));
+
+    handles
 }

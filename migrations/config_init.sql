@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS config_symbols (
 
 CREATE TABLE IF NOT EXISTS config_streams (
     name        TEXT NOT NULL,
+    stream_type TEXT NOT NULL,
     suffix      TEXT NOT NULL,
     enabled     INTEGER NOT NULL,
     memo        TEXT,
@@ -50,7 +51,7 @@ FROM (
 ) WHERE rn = 1;
 
 CREATE VIEW IF NOT EXISTS v_config_streams_current AS
-SELECT name, suffix, enabled, memo, ts
+SELECT name, stream_type, suffix, enabled, memo, ts
 FROM (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY name ORDER BY ts DESC) AS rn
     FROM config_streams

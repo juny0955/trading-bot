@@ -52,13 +52,15 @@ fn load_runtime_rows(conn: &Connection) -> Result<Vec<(String, String, String)>>
 }
 
 fn load_streams(conn: &Connection) -> Result<Vec<StreamConfig>> {
-    let mut stmt = conn.prepare("SELECT name, suffix, enabled FROM v_config_streams_current")?;
+    let mut stmt =
+        conn.prepare("SELECT name, stream_type, suffix, enabled FROM v_config_streams_current")?;
     let rows = stmt
         .query_map([], |row| {
             Ok(StreamConfig {
                 name: row.get(0)?,
-                suffix: row.get(1)?,
-                enabled: row.get::<_, i64>(2)? != 0,
+                stream_type: row.get(1)?,
+                suffix: row.get(2)?,
+                enabled: row.get::<_, i64>(3)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
