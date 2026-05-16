@@ -78,23 +78,23 @@ fn load_config_to_db() -> SharedConfig {
     );
 
     info!(
-          // binance
-          symbols = ?config.binance.symbols.iter()
-              .filter(|s| s.enabled)
-              .map(|s| s.symbol.as_str())
-              .collect::<Vec<_>>(),
-          // runtime - binance
-          binance_reconnect_delay_sec = config.runtime.binance.reconnect_delay_sec,
-          binance_read_timeout_sec    = config.runtime.binance.read_timeout_sec,
-          // runtime - alternative
-          alternative_fallback_sec = config.runtime.alternative.fallback_interval_sec,
-          alternative_retry_sec    = config.runtime.alternative.retry_interval_sec,
-          // runtime - questdb
-          questdb_batch_max_rows    = config.runtime.questdb.batch_max_rows,
-          questdb_batch_interval_ms = config.runtime.questdb.batch_interval_ms,
-          questdb_buffer_max_bytes  = config.runtime.questdb.buffer_max_bytes,
-          "Loaded config"
-      );
+        // binance
+        symbols = ?config.binance.symbols.iter()
+            .filter(|s| s.enabled)
+            .map(|s| s.symbol.as_str())
+            .collect::<Vec<_>>(),
+        // runtime - binance
+        binance_reconnect_delay_sec = config.runtime.binance.reconnect_delay_sec,
+        binance_read_timeout_sec    = config.runtime.binance.read_timeout_sec,
+        // runtime - alternative
+        alternative_fallback_sec = config.runtime.alternative.fallback_interval_sec,
+        alternative_retry_sec    = config.runtime.alternative.retry_interval_sec,
+        // runtime - questdb
+        questdb_batch_max_rows    = config.runtime.questdb.batch_max_rows,
+        questdb_batch_interval_ms = config.runtime.questdb.batch_interval_ms,
+        questdb_buffer_max_bytes  = config.runtime.questdb.buffer_max_bytes,
+        "Loaded config"
+    );
 
     config
 }

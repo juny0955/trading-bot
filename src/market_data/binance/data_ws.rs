@@ -52,7 +52,9 @@ async fn stream(
     read_timeout: Duration,
 ) -> Result<()> {
     let request = url.into_client_request().context("잘못된 URL")?;
-    let (ws_stream, _) = connect_async(request).await.context(format!("Binance {stream_type} 연결 실패"))?;
+    let (ws_stream, _) = connect_async(request)
+        .await
+        .context(format!("Binance {stream_type} 연결 실패"))?;
     let (mut write, mut read) = ws_stream.split();
 
     loop {
