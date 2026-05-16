@@ -4,3 +4,6 @@
 data/
 .idea
 deploy.sh
+.env
+.cargo
+.sqlx

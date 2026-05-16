@@ -1,24 +1,27 @@
 use crate::config::{
-    AppConfig, BinanceConfig, BinanceNet, RuntimeConfig, StreamConfig, SymbolConfig,
+    AppConfig, BinanceConfig, BinanceNet, RuntimeConfig, StreamConfig, StreamType, SymbolConfig,
 };
-use anyhow::Result;
-use rusqlite::Connection;
+use anyhow::{Result, bail};
+use sqlx::{PgPool, query};
 
-pub fn init_db() -> Result<Connection> {
-    let conn = Connection::open("./data/config.db")?;
-    conn.execute_batch(include_str!("../../migrations/config_init.sql"))?;
-    Ok(conn)
+pub async fn init_db() -> Result<PgPool> {
+    let url = std::env::var("DATABASE_URL").expect("DB URL 없음");
+    let pool = PgPool::connect(&url).await?;
+    sqlx::query(include_str!("../../migrations/init.sql"))
+        .execute(&pool)
+        .await?;
+    Ok(pool)
 }
 
-pub fn load_config(conn: &Connection) -> Result<AppConfig> {
+pub async fn load_config(pool: &PgPool) -> Result<AppConfig> {
     let binance_net = match std::env::var("BINANCE_NET").as_deref() {
         Ok("testnet") => BinanceNet::Testnet,
         _ => BinanceNet::Mainnet,
     };
 
-    let symbols = load_symbols(conn)?;
-    let runtime_rows = load_runtime_rows(conn)?;
-    let streams = load_streams(conn)?;
+    let symbols = load_symbols(pool).await?;
+    let runtime_rows = load_runtime_rows(pool).await?;
+    let streams = load_streams(pool).await?;
 
     Ok(AppConfig {
         binance: BinanceConfig {
@@ -30,39 +33,49 @@ pub fn load_config(conn: &Connection) -> Result<AppConfig> {
     })
 }
 
-fn load_symbols(conn: &Connection) -> Result<Vec<SymbolConfig>> {
-    let mut stmt = conn.prepare("SELECT symbol, enabled FROM v_config_symbols_current")?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(SymbolConfig {
-                symbol: row.get(0)?,
-                enabled: row.get::<_, i64>(1)? != 0,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+async fn load_symbols(pool: &PgPool) -> Result<Vec<SymbolConfig>> {
+    let rows = query!("SELECT symbol, enabled FROM symbols")
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| SymbolConfig {
+            symbol: r.symbol,
+            enabled: r.enabled,
+        })
+        .collect())
 }
 
-fn load_runtime_rows(conn: &Connection) -> Result<Vec<(String, String, String)>> {
-    let mut stmt = conn.prepare("SELECT type, key, value FROM v_config_runtime_current")?;
-    let rows = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+async fn load_runtime_rows(pool: &PgPool) -> Result<Vec<(String, String, String)>> {
+    let rows = query!(r#"SELECT "type", key, value FROM runtime_config"#)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.r#type, r.key, r.value))
+        .collect())
 }
 
-fn load_streams(conn: &Connection) -> Result<Vec<StreamConfig>> {
-    let mut stmt =
-        conn.prepare("SELECT name, stream_type, suffix, enabled FROM v_config_streams_current")?;
-    let rows = stmt
-        .query_map([], |row| {
+async fn load_streams(pool: &PgPool) -> Result<Vec<StreamConfig>> {
+    let rows = query!("SELECT name, stream_type, suffix, enabled FROM streams")
+        .fetch_all(pool)
+        .await?;
+
+    rows.into_iter()
+        .map(|r| {
+            let stream_type = match r.stream_type.as_str() {
+                "MARKET" => StreamType::Market,
+                "PUBLIC" => StreamType::Public,
+                "PRIVATE" => StreamType::Private,
+                other => bail!("알수없는 stream_type: {other}"),
+            };
             Ok(StreamConfig {
-                name: row.get(0)?,
-                stream_type: row.get(1)?,
-                suffix: row.get(2)?,
-                enabled: row.get::<_, i64>(3)? != 0,
+                name: r.name,
+                stream_type,
+                suffix: r.suffix,
+                enabled: r.enabled,
             })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+        })
+        .collect()
 }

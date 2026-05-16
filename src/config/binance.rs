@@ -1,5 +1,3 @@
-use rusqlite::types::{FromSql, FromSqlResult, ValueRef};
-
 #[derive(Debug, Clone)]
 pub struct BinanceConfig {
     pub net: BinanceNet,
@@ -32,19 +30,6 @@ pub struct StreamConfig {
     pub stream_type: StreamType,
     pub suffix: String,
     pub enabled: bool,
-}
-
-impl FromSql for StreamType {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        match value.as_str()? {
-            "MARKET" => Ok(StreamType::Market),
-            "PUBLIC" => Ok(StreamType::Public),
-            "PRIVATE" => Ok(StreamType::Private),
-            _ => Err(rusqlite::types::FromSqlError::Other(
-                format!("알수없는 stream_type: {}", value.as_str().unwrap_or("?")).into(),
-            )),
-        }
-    }
 }
 
 impl BinanceConfig {

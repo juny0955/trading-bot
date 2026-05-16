@@ -13,5 +13,17 @@ services:
     environment:
       - QDB_TELEMETRY_ENABLED=false
 
+  postgres:
+    image: postgres:17.2-alpine
+    environment:
+      POSTGRES_DB: ${PG_DB}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PW}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
 volumes:
   questdb_data:
+  pgdata:

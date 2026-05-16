@@ -1,11 +1,11 @@
 use crate::config::{AlternativeRuntimeConfig, BinanceConfig, BinanceRuntimeConfig, SharedConfig};
-use crate::types::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
 use crate::market_data::binance::data_ws::subscribe_to_binance_futures_ws;
 use crate::market_data::binance::dto::StreamData;
 use crate::storage::config_db::{init_db, load_config};
 use crate::storage::event::StorageEvent;
 use crate::storage::questdb::writer;
+use crate::types::FngData;
 use anyhow::Result;
 use futures_util::future::join_all;
 use tokio::sync::mpsc;
@@ -16,7 +16,7 @@ use tracing::{info, warn};
 
 pub async fn run() -> Result<()> {
     crate::init::setup();
-    let config = load_config_to_db();
+    let config = load_config_to_db().await;
     let quest_db_url = std::env::var("QUESTDB_URL").expect("DB URL 없음");
     let (db_tx, db_rx) = mpsc::channel::<StorageEvent>(1000);
     let token = CancellationToken::new();
@@ -60,12 +60,12 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-fn load_config_to_db() -> SharedConfig {
-    let config = SharedConfig::new(
-        init_db()
-            .and_then(|conn| load_config(&conn))
-            .expect("Config 로드 실패"),
-    );
+async fn load_config_to_db() -> SharedConfig {
+    let pool = init_db().await.expect("DB 초기화 실패");
+
+    let app_config = load_config(&pool).await.expect("Config 로드 실패");
+
+    let config = SharedConfig::new(app_config);
 
     info!(
         // binance
