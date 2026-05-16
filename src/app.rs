@@ -1,4 +1,4 @@
-use crate::config::{BinanceConfig, BinanceRuntimeConfig, FngRuntimeConfig, SharedConfig};
+use crate::config::{AlternativeRuntimeConfig, BinanceConfig, BinanceRuntimeConfig, SharedConfig};
 use crate::market_data::alternative::dto::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
 use crate::market_data::binance::data_ws::subscribe_to_binance_futures_ws;
@@ -16,18 +16,25 @@ use tracing::{info, warn};
 
 pub async fn run() -> Result<()> {
     setup();
-    let config = load_config_to_sqlite();
+    let config = load_config_to_db();
     let quest_db_url = std::env::var("QUESTDB_URL").expect("DB URL 없음");
     let (db_tx, db_rx) = mpsc::channel::<StorageEvent>(1000);
     let token = CancellationToken::new();
 
     let mut handles = Vec::new();
     let writer_token = token.clone();
+    let value = config.clone();
     handles.push(tokio::spawn(async move {
-        writer::run(&quest_db_url, db_rx, writer_token).await
+        writer::run(
+            &quest_db_url,
+            value.runtime.questdb.clone(),
+            db_rx,
+            writer_token,
+        )
+        .await
     }));
-    handles.extend(spawn_fng(
-        config.runtime.fng.clone(),
+    handles.extend(spawn_alternative(
+        config.runtime.alternative.clone(),
         db_tx.clone(),
         token.clone(),
     ));
@@ -63,7 +70,7 @@ pub fn setup() {
         .init();
 }
 
-fn load_config_to_sqlite() -> SharedConfig {
+fn load_config_to_db() -> SharedConfig {
     let config = SharedConfig::new(
         init_db()
             .and_then(|conn| load_config(&conn))
@@ -71,18 +78,29 @@ fn load_config_to_sqlite() -> SharedConfig {
     );
 
     info!(
-        symbols = ?config.binance.symbols.iter().map(|s| s.symbol.as_str()).collect::<Vec<_>>(),
-        binance_reconnect_delay_sec = config.runtime.binance.reconnect_delay_sec,
-        fng_fallback_sec = config.runtime.fng.fallback_interval_sec,
-        fng_retry_sec = config.runtime.fng.retry_interval_sec,
-        "Loaded config"
-    );
+          // binance
+          symbols = ?config.binance.symbols.iter()
+              .filter(|s| s.enabled)
+              .map(|s| s.symbol.as_str())
+              .collect::<Vec<_>>(),
+          // runtime - binance
+          binance_reconnect_delay_sec = config.runtime.binance.reconnect_delay_sec,
+          binance_read_timeout_sec    = config.runtime.binance.read_timeout_sec,
+          // runtime - alternative
+          alternative_fallback_sec = config.runtime.alternative.fallback_interval_sec,
+          alternative_retry_sec    = config.runtime.alternative.retry_interval_sec,
+          // runtime - questdb
+          questdb_batch_max_rows    = config.runtime.questdb.batch_max_rows,
+          questdb_batch_interval_ms = config.runtime.questdb.batch_interval_ms,
+          questdb_buffer_max_bytes  = config.runtime.questdb.buffer_max_bytes,
+          "Loaded config"
+      );
 
     config
 }
 
-fn spawn_fng(
-    cfg: FngRuntimeConfig,
+fn spawn_alternative(
+    cfg: AlternativeRuntimeConfig,
     db_tx: Sender<StorageEvent>,
     token: CancellationToken,
 ) -> Vec<JoinHandle<()>> {
@@ -116,12 +134,12 @@ fn spawn_binance(
     let stx = stream_tx.clone();
     let t = token.clone();
     handles.push(tokio::spawn(async move {
-        subscribe_to_binance_futures_ws(public_url, rc, stx, t).await
+        subscribe_to_binance_futures_ws(public_url, "Public", rc, stx, t).await
     }));
 
     let market_url = cfg.market_ws_url();
     handles.push(tokio::spawn(async move {
-        subscribe_to_binance_futures_ws(market_url, runtime_cfg, stream_tx, token).await
+        subscribe_to_binance_futures_ws(market_url, "Market", runtime_cfg, stream_tx, token).await
     }));
 
     handles.push(tokio::spawn(async move {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::config::FngRuntimeConfig;
+use crate::config::AlternativeRuntimeConfig;
 use crate::market_data::alternative::dto::{FngData, FngResponse};
 use tokio::{sync::mpsc::Sender, time::sleep};
 use tokio_util::sync::CancellationToken;
@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 const URL: &str = "https://api.alternative.me/fng/";
 
 pub async fn fetch_alternative_fng(
-    cfg: FngRuntimeConfig,
+    cfg: AlternativeRuntimeConfig,
     tx: Sender<FngData>,
     token: CancellationToken,
 ) {
@@ -30,7 +30,7 @@ pub async fn fetch_alternative_fng(
     info!("Alternative 수신 종료");
 }
 
-async fn fetch_once(cfg: &FngRuntimeConfig, tx: &Sender<FngData>) -> Option<Duration> {
+async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Option<Duration> {
     let resp = match reqwest::get(URL).await {
         Ok(r) => r,
         Err(e) => {

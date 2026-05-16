@@ -1,3 +1,4 @@
+use crate::config::QuestDbRuntimeConfig;
 use crate::market_data::alternative::dto::FngData;
 use crate::market_data::binance::dto::{
     BookTickerData, DepthData, KlineData, MarkPriceData, TradeData,
@@ -10,11 +11,12 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-const BATCH_MAX_ROWS: usize = 5_000;
-const BATCH_INTERVAL: Duration = Duration::from_millis(100);
-const BUFFER_MAX_BYTES: usize = 1024 * 1024;
-
-pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationToken) {
+pub async fn run(
+    url: &str,
+    cfg: QuestDbRuntimeConfig,
+    mut rx: Receiver<StorageEvent>,
+    token: CancellationToken,
+) {
     let mut sender = match Sender::from_conf(url) {
         Ok(s) => s,
         Err(e) => {
@@ -26,7 +28,7 @@ pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationT
     let mut buf = Buffer::new(ProtocolVersion::V3);
     let mut rows: usize = 0;
 
-    let mut ticker = interval(BATCH_INTERVAL);
+    let mut ticker = interval(Duration::from_millis(cfg.batch_interval_ms));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
@@ -56,7 +58,7 @@ pub async fn run(url: &str, mut rx: Receiver<StorageEvent>, token: CancellationT
                     }
                 }
 
-                if rows >= BATCH_MAX_ROWS || buf.len() >= BUFFER_MAX_BYTES {
+                if rows >= cfg.batch_max_rows || buf.len() >= cfg.buffer_max_bytes {
                     flush_if_any(&mut sender, &mut buf, &mut rows, url, "size");
                 }
             }
@@ -95,7 +97,6 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
 }
 
 fn append_trade(buf: &mut Buffer, d: &TradeData) -> questdb::Result<()> {
-    info!("{d:?}");
     buf.table("trades")?
         .symbol("symbol", &d.symbol)?
         .column_dec("price", &d.price)?
