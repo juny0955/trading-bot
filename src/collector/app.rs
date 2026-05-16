@@ -1,5 +1,5 @@
 use crate::config::{AlternativeRuntimeConfig, BinanceConfig, BinanceRuntimeConfig, SharedConfig};
-use crate::market_data::alternative::dto::FngData;
+use crate::types::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
 use crate::market_data::binance::data_ws::subscribe_to_binance_futures_ws;
 use crate::market_data::binance::dto::StreamData;
@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 pub async fn run() -> Result<()> {
-    setup();
+    crate::init::setup();
     let config = load_config_to_db();
     let quest_db_url = std::env::var("QUESTDB_URL").expect("DB URL 없음");
     let (db_tx, db_rx) = mpsc::channel::<StorageEvent>(1000);
@@ -58,16 +58,6 @@ pub async fn run() -> Result<()> {
     token.cancel();
     let _ = join_all(handles).await;
     Ok(())
-}
-
-pub fn setup() {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install crypto provider");
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .compact()
-        .init();
 }
 
 fn load_config_to_db() -> SharedConfig {

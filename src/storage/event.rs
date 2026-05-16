@@ -1,7 +1,5 @@
-use crate::market_data::alternative::dto::FngData;
-use crate::market_data::binance::dto::{
-    BookTickerData, DepthData, KlineData, MarkPriceData, StreamData, TradeData,
-};
+use crate::market_data::binance::dto::StreamData;
+use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 
 pub enum StorageEvent {
     Trade(TradeData),

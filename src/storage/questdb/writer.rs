@@ -1,8 +1,5 @@
 use crate::config::QuestDbRuntimeConfig;
-use crate::market_data::alternative::dto::FngData;
-use crate::market_data::binance::dto::{
-    BookTickerData, DepthData, KlineData, MarkPriceData, TradeData,
-};
+use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 use crate::storage::event::StorageEvent;
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
 use std::time::Duration;

@@ -4,11 +4,11 @@ use clap::Parser;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
 use tracing::info;
-use trading_bot::app;
 use trading_bot::backtest::engine::{self, BacktestConfig};
 use trading_bot::backtest::questdb_data::QuestDbRestDataSource;
 use trading_bot::backtest::report;
 use trading_bot::backtest::strategies;
+use trading_bot::init;
 
 #[derive(Parser, Debug, serde::Serialize)]
 #[command(name = "backtest")]
@@ -41,7 +41,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    app::setup();
+    init::setup();
     let args = Args::parse();
 
     let rest_url =

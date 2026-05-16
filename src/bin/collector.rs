@@ -1,5 +1,5 @@
 use anyhow::Result;
-use trading_bot::app;
+use trading_bot::collector::app;
 
 #[tokio::main]
 async fn main() -> Result<()> {
