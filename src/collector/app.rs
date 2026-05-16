@@ -17,7 +17,7 @@ use tracing::{info, warn};
 pub async fn run() -> Result<()> {
     crate::init::setup();
     let config = load_config_to_db().await;
-    let quest_db_url = std::env::var("QUESTDB_URL").expect("DB URL 없음");
+    let quest_db_url = std::env::var("QUESTDB_URL").expect("QuestDB URL 없음");
     let (db_tx, db_rx) = mpsc::channel::<StorageEvent>(1000);
     let token = CancellationToken::new();
 
@@ -61,29 +61,33 @@ pub async fn run() -> Result<()> {
 }
 
 async fn load_config_to_db() -> SharedConfig {
-    let pool = init_db().await.expect("DB 초기화 실패");
+    let pool = init_db().await.expect("POSTGRESQL DB 초기화 실패");
 
     let app_config = load_config(&pool).await.expect("Config 로드 실패");
 
     let config = SharedConfig::new(app_config);
 
     info!(
-        // binance
-        symbols = ?config.binance.symbols.iter()
+        "\n================ [ Config Loaded ] ================\n\
+     * Symbols  : {:?}\n\
+     * Binance  : Reconnect = {}s, Timeout = {}s\n\
+     * Alt FNG  : Fallback = {}s, Retry = {}s\n\
+     * QuestDB  : Max Rows = {}, Interval = {}ms, Buffer = {}B\n\
+     ==================================================",
+        config
+            .binance
+            .symbols
+            .iter()
             .filter(|s| s.enabled)
             .map(|s| s.symbol.as_str())
             .collect::<Vec<_>>(),
-        // runtime - binance
-        binance_reconnect_delay_sec = config.runtime.binance.reconnect_delay_sec,
-        binance_read_timeout_sec    = config.runtime.binance.read_timeout_sec,
-        // runtime - alternative
-        alternative_fallback_sec = config.runtime.alternative.fallback_interval_sec,
-        alternative_retry_sec    = config.runtime.alternative.retry_interval_sec,
-        // runtime - questdb
-        questdb_batch_max_rows    = config.runtime.questdb.batch_max_rows,
-        questdb_batch_interval_ms = config.runtime.questdb.batch_interval_ms,
-        questdb_buffer_max_bytes  = config.runtime.questdb.buffer_max_bytes,
-        "Loaded config"
+        config.runtime.binance.reconnect_delay_sec,
+        config.runtime.binance.read_timeout_sec,
+        config.runtime.alternative.fallback_interval_sec,
+        config.runtime.alternative.retry_interval_sec,
+        config.runtime.questdb.batch_max_rows,
+        config.runtime.questdb.batch_interval_ms,
+        config.runtime.questdb.buffer_max_bytes,
     );
 
     config
