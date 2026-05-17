@@ -2,13 +2,22 @@ use crate::order::executor::OrderExecutor;
 use crate::order::storage::OrderStorage;
 use crate::order::types::{Order, OrderError, OrderRequest, OrderStatus};
 use crate::storage::event::StorageEvent;
+use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::Utc;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::time;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub struct LiveOrderExecutor {
@@ -41,7 +50,7 @@ impl OrderExecutor for LiveOrderExecutor {
         );
         let sig = sign(&self.secret, &params_str);
 
-        let request_json = serde_json::json!({
+        let req = json!({
             "id": id,
             "method": "order.place",
             "params": {
@@ -50,35 +59,14 @@ impl OrderExecutor for LiveOrderExecutor {
                 "type": "MARKET",
                 "quantity": request.qty,
                 "timestamp": ts,
-                "apikey": self.api_key,
+                "apiKey": self.api_key,
                 "signature": sig,
             }
         });
-
-        let (resp_tx, resp_rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, resp_tx);
-
-        self.ws_tx
-            .send(request_json.to_string())
-            .await
-            .map_err(|e| OrderError::Connection(e.to_string()))?;
-
-        let resp = tokio::time::timeout(Duration::from_secs(5), resp_rx)
-            .await
-            .map_err(|_| OrderError::Connection("timeout".into()))?
-            .map_err(|_| OrderError::Connection("channel closed".into()))?;
-
-        if resp["status"].as_u64() != Some(200) {
-            let code = resp["error"]["code"].as_i64().unwrap_or(-1) as i32;
-            let msg = resp["error"]["msg"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            return Err(OrderError::ExchangeRejected { code, msg });
-        }
+        let result = self.send_and_wait(id, req).await?;
 
         let mut filled = order.clone();
-        filled.exchange_order_id = resp["result"]["orderId"].as_i64();
+        filled.exchange_order_id = result["orderId"].as_i64();
         filled.status = OrderStatus::New;
         self.storage
             .upsert_order(&filled)
@@ -88,16 +76,135 @@ impl OrderExecutor for LiveOrderExecutor {
         Ok(filled)
     }
 
-    async fn cancel(&self, _order_id: Uuid) -> Result<Order, OrderError> {
-        unimplemented!()
+    async fn cancel(&self, order_id: Uuid) -> Result<Order, OrderError> {
+        let order = self.get_order(order_id).await?;
+        let exchange_id = order
+            .exchange_order_id
+            .ok_or_else(|| OrderError::NotFound("exchange_order_id 없음".into()))?;
+
+        let id = Uuid::now_v7().to_string();
+        let ts = timestamp_ms();
+        let params_str = format!(
+            "symbol={}&orderId={}&timestamp={}",
+            order.symbol, exchange_id, ts
+        );
+        let sig = sign(&self.secret, &params_str);
+
+        let req = json!({
+            "id": id,
+            "method": "order.cancel",
+            "params": {
+                "symbol": order.symbol,
+                "orderId": exchange_id,
+                "timestamp": ts,
+                "apiKey": self.api_key,
+                "signature": sig
+            }
+        });
+        let result = self.send_and_wait(id, req).await?;
+
+        let mut cancelled = order;
+        if result["status"].as_str() == Some("CANCELED") {
+            cancelled.status = OrderStatus::Cancelled;
+            cancelled.updated_at = Utc::now();
+            self.storage
+                .upsert_order(&cancelled)
+                .await
+                .map_err(OrderError::Storage)?;
+        }
+        Ok(cancelled)
     }
 
-    async fn query(&self, _order_id: Uuid) -> Result<Order, OrderError> {
-        unimplemented!()
+    async fn query(&self, order_id: Uuid) -> Result<Order, OrderError> {
+        let order = self.get_order(order_id).await?;
+        let exchange_id = order
+            .exchange_order_id
+            .ok_or_else(|| OrderError::NotFound("exchange_order_id 없음".into()))?;
+
+        let id = Uuid::now_v7().to_string();
+        let ts = timestamp_ms();
+        let params_str = format!(
+            "symbol={}&orderId={}&timestamp={}",
+            order.symbol, exchange_id, ts
+        );
+        let sig = sign(&self.secret, &params_str);
+
+        let req = serde_json::json!({
+            "id": id,
+            "method": "order.status",
+            "params": {
+                "symbol": order.symbol,
+                "orderId": exchange_id,
+                "timestamp": ts,
+                "apiKey": self.api_key,
+                "signature": sig
+            }
+        });
+        let result = self.send_and_wait(id, req).await?;
+
+        let mut updated = order;
+        updated.status = match result["status"].as_str() {
+            Some("FILLED") => OrderStatus::Filled,
+            Some("CANCELED") => OrderStatus::Cancelled,
+            Some("PARTIALLY_FILLED") => OrderStatus::PartiallyFilled,
+            Some("EXPIRED") => OrderStatus::Expired,
+            Some("REJECTED") => OrderStatus::Rejected,
+            _ => updated.status,
+        };
+        updated.updated_at = Utc::now();
+        self.storage
+            .upsert_order(&updated)
+            .await
+            .map_err(OrderError::Storage)?;
+        Ok(updated)
     }
 
-    async fn open_orders(&self, _symbol: &str) -> Result<Vec<Order>, OrderError> {
-        unimplemented!()
+    async fn open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+        let id = Uuid::now_v7().to_string();
+        let ts = timestamp_ms();
+        let params_str = format!("symbol={}&timestamp={}", symbol, ts);
+        let sig = sign(&self.secret, &params_str);
+
+        let req = json!({
+            "id": id,
+            "method": "openOrders.status",
+            "params": {
+                "symbol": symbol,
+                "timestamp": ts,
+                "apiKey": self.api_key,
+                "signature": sig
+            }
+        });
+        let result = self.send_and_wait(id, req).await?;
+
+        // Binance에 살아있는 orderId 집합
+        let binance_ids: std::collections::HashSet<i64> = result
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|o| o["orderId"].as_i64())
+            .collect();
+
+        let mut db_orders = self
+            .storage
+            .find_open(symbol)
+            .await
+            .map_err(OrderError::Storage)?;
+
+        for order in &mut db_orders {
+            if let Some(eid) = order.exchange_order_id
+                && !binance_ids.contains(&eid)
+            {
+                order.status = OrderStatus::Expired;
+                order.updated_at = Utc::now();
+                let _ = self.storage.upsert_order(order).await;
+            }
+        }
+
+        Ok(db_orders
+            .into_iter()
+            .filter(|o| matches!(o.status, OrderStatus::New | OrderStatus::PartiallyFilled))
+            .collect())
     }
 }
 
@@ -140,6 +247,135 @@ impl LiveOrderExecutor {
             storage: OrderStorage::new(pool),
         });
         (executor, ws_rx)
+    }
+
+    pub fn start(self: Arc<Self>, ws_rx: Receiver<String>, token: CancellationToken) {
+        info!("Order WS Worker 시작");
+        tokio::spawn(async move {
+            self.run_order_ws(ws_rx, token).await;
+        });
+    }
+
+    async fn run_order_ws(&self, mut ws_rx: Receiver<String>, token: CancellationToken) {
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    info!("Order WS Worker 종료");
+                    return;
+                }
+                res = self.order_ws_session(&mut ws_rx, token.clone()) => {
+                    if res.is_ok() { return; }
+                    let pending_count = {
+                        let mut p = self.pending.lock().await;
+                        let n = p.len();
+                        p.clear();
+                        n
+                    };
+                    if pending_count > 0 {
+                        warn!("Order WS 재연결 — 대기 중 요청 {} 건 실패 처리", pending_count);
+                    }
+                    error!("Order WS 에러, 3초 후 재연결");
+                    tokio::select! {
+                        _ = token.cancelled() => return,
+                        _ = time::sleep(Duration::from_secs(3)) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    async fn order_ws_session(
+        &self,
+        ws_rx: &mut Receiver<String>,
+        token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let (ws_stream, _) = connect_async(&self.order_ws_url).await
+            .inspect_err(|e| error!("Order WS 연결 실패: {e}"))?;
+        info!("Order WS 연결됨: {}", self.order_ws_url);
+        let (mut write, mut read) = ws_stream.split();
+
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    let _ = write.send(Message::Close(None)).await;
+                    info!("Order WS Close Frame 전송 후 종료");
+                    return Ok(());
+                }
+                msg = ws_rx.recv() => match msg {
+                    Some(text) => {
+                        write.send(Message::Text(text.into())).await?;
+                    }
+                    None => {
+                        info!("Order WS 채널 닫힘 — 종료");
+                        return Ok(());
+                    }
+                },
+                msg = time::timeout(Duration::from_secs(30), read.next()) => {
+                    match msg {
+                        Ok(Some(Ok(Message::Text(text)))) => {
+                            if let Ok(val) = serde_json::from_str::<Value>(&text)
+                            && let Some(id) = val["id"].as_str()
+                            && let Some(tx) = self.pending.lock().await.remove(id) {
+                                let _ = tx.send(val);
+                            }
+                        }
+                        Ok(Some(Ok(Message::Ping(payload)))) => {
+                            write.send(Message::Pong(payload)).await?;
+                        }
+                        Ok(Some(Ok(Message::Close(_)))) => {
+                            return Err(anyhow!("Order WS 서버 측 Close"));
+                        }
+                        Ok(None) => {
+                            return Err(anyhow!("Order WS 스트림 종료"));
+                        }
+                        Err(_) => {
+                            return Err(anyhow!("Order WS 타임아웃 30s"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    async fn get_order(&self, order_id: Uuid) -> Result<Order, OrderError> {
+        self.storage
+            .find_by_id(order_id)
+            .await
+            .map_err(OrderError::Storage)?
+            .ok_or_else(|| OrderError::NotFound(order_id.to_string()))
+    }
+
+    async fn send_and_wait(&self, id: String, request: Value) -> Result<Value, OrderError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.pending.lock().await.insert(id.clone(), resp_tx);
+
+        if let Err(e) = self.ws_tx.send(request.to_string()).await {
+            self.pending.lock().await.remove(&id);
+            warn!("Order WS 송신 실패 (id={id}): {e}");
+            return Err(OrderError::Connection(e.to_string()));
+        }
+
+        match time::timeout(Duration::from_secs(5), resp_rx).await {
+            Ok(Ok(val)) => {
+                if val["status"].as_u64() != Some(200) {
+                    let code = val["error"]["code"].as_i64().unwrap_or(-1) as i32;
+                    let msg = val["error"]["msg"].as_str().unwrap_or("unknown").to_string();
+                    warn!("Order WS 거래소 거부 (id={id}, code={code}): {msg}");
+                    return Err(OrderError::ExchangeRejected { code, msg });
+                }
+                Ok(val["result"].clone())
+            }
+            Ok(Err(_)) => {
+                warn!("Order WS 채널 닫힘 (id={id})");
+                Err(OrderError::Connection("channel closed".into()))
+            }
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                warn!("Order WS 응답 timeout (id={id})");
+                Err(OrderError::Connection("timeout".into()))
+            }
+        }
     }
 }
 
