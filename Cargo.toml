@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-reqwest = { version = "0.13.3", features = ["json"] }
+reqwest = { version = "0.13.3", features = ["json", "query"] }
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-tungstenite = { version = "0.29.0", features = [
     "rustls-tls-webpki-roots",

@@ -88,4 +88,14 @@ impl OrderStorage {
             .fetch_optional(&self.pool)
             .await
     }
+
+    pub async fn find_by_exchange_id(
+        &self,
+        exchange_id: i64,
+    ) -> Result<Option<Order>, sqlx::Error> {
+        sqlx::query_as::<_, Order>(r#"SELECT * FROM orders WHERE exchange_order_id = $1"#)
+            .bind(exchange_id)
+            .fetch_optional(&self.pool)
+            .await
+    }
 }
