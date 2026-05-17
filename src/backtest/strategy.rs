@@ -1,25 +1,20 @@
-use crate::backtest::types::{BacktestOrder, Bar, DepthSnapshot, Position, Side};
+use crate::backtest::types::{Bar, DepthSnapshot, Position};
+use crate::order::backtest::BacktestOrderExecutor;
+use async_trait::async_trait;
 use rust_decimal::Decimal;
+use std::sync::Arc;
 
-pub struct Context<'a> {
+pub struct Context {
     pub now_ns: i64,
-    pub position: &'a Position,
     pub equity: Decimal,
-    pub(crate) pending: &'a mut Vec<BacktestOrder>,
+    pub position: Position,
+    pub executor: Arc<BacktestOrderExecutor>,
 }
 
-impl Context<'_> {
-    pub fn submit_market(&mut self, side: Side, qty: Decimal) {
-        self.pending.push(BacktestOrder::Market { side, qty });
-    }
-    pub fn close_position(&mut self) {
-        self.pending.push(BacktestOrder::Close);
-    }
-}
-
-pub trait Strategy {
-    fn on_start(&mut self, _ctx: &mut Context) {}
-    fn on_bar(&mut self, bar: &Bar, ctx: &mut Context);
-    fn on_depth(&mut self, _snap: &DepthSnapshot, _ctx: &mut Context) {}
-    fn on_finish(&mut self, _ctx: &mut Context) {}
+#[async_trait]
+pub trait Strategy: Send {
+    async fn on_start(&mut self, _ctx: &Context) {}
+    async fn on_bar(&mut self, bar: &Bar, ctx: &Context);
+    async fn on_depth(&mut self, _snap: &DepthSnapshot, _ctx: &Context) {}
+    async fn on_finish(&mut self, _ctx: &Context) {}
 }

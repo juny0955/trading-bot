@@ -5,7 +5,9 @@ use rust_decimal_macros::dec;
 use trading_bot::backtest::data::{BarQuery, DepthQuery, MarketDataSource};
 use trading_bot::backtest::engine::{self, BacktestConfig};
 use trading_bot::backtest::strategy::{Context, Strategy};
-use trading_bot::backtest::types::{Bar, DepthSnapshot, Side};
+use trading_bot::backtest::types::{Bar, DepthSnapshot};
+use trading_bot::order::executor::OrderExecutor;
+use trading_bot::order::types::{OrderRequest, OrderSide, OrderType};
 
 struct LinearSource {
     bars: Vec<Bar>,
@@ -26,10 +28,20 @@ struct BuyAndHold {
     qty: Decimal,
 }
 
+#[async_trait]
 impl Strategy for BuyAndHold {
-    fn on_bar(&mut self, _bar: &Bar, ctx: &mut Context) {
+    async fn on_bar(&mut self, bar: &Bar, ctx: &Context) {
         if !self.fired {
-            ctx.submit_market(Side::Long, self.qty);
+            let _ = ctx
+                .executor
+                .submit(OrderRequest {
+                    symbol: bar.symbol.clone(),
+                    order_type: OrderType::Market,
+                    side: OrderSide::Buy,
+                    qty: self.qty,
+                    ..Default::default()
+                })
+                .await;
             self.fired = true;
         }
     }
@@ -46,7 +58,6 @@ async fn buy_and_hold_golden_pnl() {
         .map(|i| {
             let step = Decimal::from(i) * dec!(100) / Decimal::from(n - 1);
             let close = dec!(100) + step;
-            // open = close (단순화: bar 내부 변동 없음)
             Bar {
                 symbol: "X".into(),
                 ts_ns: (i as i64 + 1) * 1_000_000_000,
@@ -78,20 +89,17 @@ async fn buy_and_hold_golden_pnl() {
 
     assert_eq!(res.portfolio.closed_trades.len(), 1);
     let trade = &res.portfolio.closed_trades[0];
-    let entry = bars[1].open; // 두 번째 bar의 open 에서 fill (1-tick 지연)
-    let exit = bars.last().unwrap().close; // 마지막 bar close 에서 자동 청산
+    let entry = bars[1].open;
+    let exit = bars.last().unwrap().close;
     assert_eq!(trade.entry_price, entry);
     assert_eq!(trade.exit_price, exit);
 
-    // 검증: gross_pnl = (exit - entry) * qty
     let expected_gross = (exit - entry) * dec!(1);
-    // 수수료: entry_fee + exit_fee = (entry + exit) * qty * 4/10000
     let expected_fees = (entry + exit) * dec!(1) * dec!(4) / dec!(10000);
     let expected_net = expected_gross - expected_fees;
     assert_eq!(trade.gross_pnl, expected_gross);
     assert_eq!(trade.fees, expected_fees);
     assert_eq!(trade.net_pnl, expected_net);
 
-    // final_equity = initial + realized
     assert_eq!(res.portfolio.equity, dec!(10000) + expected_net);
 }

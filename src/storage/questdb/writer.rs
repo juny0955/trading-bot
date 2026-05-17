@@ -1,4 +1,5 @@
 use crate::config::QuestDbRuntimeConfig;
+use crate::order::types::Fill;
 use crate::storage::event::StorageEvent;
 use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
@@ -44,6 +45,7 @@ pub async fn run(
                     StorageEvent::Kline(d) => append_kline(&mut buf, d),
                     StorageEvent::MarkPrice(d) => append_mark_price(&mut buf, d),
                     StorageEvent::Fng(d) => append_fng(&mut buf, d),
+                    StorageEvent::Fill(d) => append_fill(&mut buf, d),
                 };
 
                 match result {
@@ -194,5 +196,20 @@ fn append_fng(buf: &mut Buffer, d: &FngData) -> questdb::Result<()> {
         .column_str("value", &d.value)?
         .at(TimestampNanos::new(ts_seconds * 1_000_000_000))?;
 
+    Ok(())
+}
+
+fn append_fill(buf: &mut Buffer, d: &Fill) -> questdb::Result<()> {
+    buf.table("fill")?
+        .symbol("symbol", &d.symbol)?
+        .symbol("side", &format!("{:?}", d.side).to_lowercase())?
+        .symbol("fee_asset", &d.fee_asset)?
+        .column_str("order_id", &d.order_id.to_string())?
+        .column_dec("qty", &d.qty)?
+        .column_dec("price", &d.price)?
+        .column_dec("fee", &d.fee)?
+        .at(TimestampNanos::new(
+            d.filled_at.timestamp_nanos_opt().unwrap_or(0),
+        ))?;
     Ok(())
 }

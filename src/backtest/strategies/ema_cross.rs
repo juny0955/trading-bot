@@ -1,6 +1,9 @@
 use crate::backtest::strategy::{Context, Strategy};
-use crate::backtest::types::{Bar, Side};
+use crate::backtest::types::Bar;
+use crate::order::executor::OrderExecutor;
+use crate::order::types::{OrderRequest, OrderSide, OrderType};
 use anyhow::Result;
+use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
@@ -42,10 +45,43 @@ impl EmaCross {
             bars_seen: 0,
         })
     }
+
+    async fn close_and_open(ctx: &Context, symbol: &str, new_side: OrderSide, qty: Decimal) {
+        if let Some(cur) = ctx.position.side {
+            let close_side = if cur == OrderSide::Buy {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
+            let _ = ctx
+                .executor
+                .submit(OrderRequest {
+                    symbol: symbol.into(),
+                    order_type: OrderType::Market,
+                    side: close_side,
+                    qty: ctx.position.qty,
+                    reduce_only: true,
+                    ..Default::default()
+                })
+                .await;
+        }
+
+        let _ = ctx
+            .executor
+            .submit(OrderRequest {
+                symbol: symbol.into(),
+                order_type: OrderType::Market,
+                side: new_side,
+                qty,
+                ..Default::default()
+            })
+            .await;
+    }
 }
 
+#[async_trait]
 impl Strategy for EmaCross {
-    fn on_bar(&mut self, bar: &Bar, ctx: &mut Context) {
+    async fn on_bar(&mut self, bar: &Bar, ctx: &Context) {
         let price = bar.close.to_f64().unwrap_or(0.0);
         let kf = 2.0 / (self.fast_n as f64 + 1.0);
         let ks = 2.0 / (self.slow_n as f64 + 1.0);
@@ -58,13 +94,10 @@ impl Strategy for EmaCross {
 
         let diff = self.fast_ema.unwrap() - self.slow_ema.unwrap();
         if let Some(prev) = self.prev_diff {
-            // golden cross → long, dead cross → short
             if prev <= 0.0 && diff > 0.0 {
-                ctx.close_position();
-                ctx.submit_market(Side::Long, self.qty);
+                Self::close_and_open(ctx, &bar.symbol, OrderSide::Buy, self.qty).await;
             } else if prev >= 0.0 && diff < 0.0 {
-                ctx.close_position();
-                ctx.submit_market(Side::Short, self.qty);
+                Self::close_and_open(ctx, &bar.symbol, OrderSide::Sell, self.qty).await;
             }
         }
         self.prev_diff = Some(diff);

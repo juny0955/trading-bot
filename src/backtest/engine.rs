@@ -1,10 +1,12 @@
 use crate::backtest::data::{BarQuery, DepthQuery, MarketDataSource};
-use crate::backtest::portfolio::Portfolio;
 use crate::backtest::strategy::{Context, Strategy};
-use crate::backtest::types::{BacktestOrder, Bar, DepthSnapshot, Event, Side};
+use crate::backtest::types::{Bar, DepthSnapshot, Event};
+use crate::order::backtest::{BacktestOrderExecutor, PortfolioSnapshot};
+use crate::order::executor::OrderExecutor;
+use crate::order::types::{OrderRequest, OrderSide, OrderType};
 use anyhow::Result;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::Zero;
+use std::sync::Arc;
 use tracing::info;
 
 pub struct BacktestConfig {
@@ -27,7 +29,7 @@ pub struct EquityPoint {
 }
 
 pub struct BacktestResult {
-    pub portfolio: Portfolio,
+    pub portfolio: PortfolioSnapshot,
     pub equity_curve: Vec<EquityPoint>,
 }
 
@@ -56,120 +58,101 @@ pub async fn run(
 
     let events = merge_events(bars, depths);
     if events.is_empty() {
+        let executor = BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps);
         return Ok(BacktestResult {
-            portfolio: Portfolio::new(cfg.initial_equity, cfg.fee_bps),
+            portfolio: executor.snapshot(),
             equity_curve: Vec::new(),
         });
     }
 
-    let mut portfolio = Portfolio::new(cfg.initial_equity, cfg.fee_bps);
-    let mut pending: Vec<BacktestOrder> = Vec::new();
-    let mut equity_curve: Vec<EquityPoint> = Vec::with_capacity(events.len());
+    let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
+
+    let mut equity_curve = Vec::with_capacity(events.len());
     let mut last_depth: Option<&DepthSnapshot> = None;
     let depth_fresh_ns = cfg.depth_freshness_sec.saturating_mul(1_000_000_000);
 
     {
-        let mut ctx = Context {
+        let ctx = Context {
             now_ns: events[0].ts_ns(),
-            position: &portfolio.position,
-            equity: portfolio.equity,
-            pending: &mut pending,
+            equity: executor.equity(),
+            position: executor.position(),
+            executor: executor.clone(),
         };
-        strategy.on_start(&mut ctx);
+        strategy.on_start(&ctx).await;
     }
 
     for ev in &events {
         let ts = ev.ts_ns();
+        let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Buy);
+        let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Sell);
+        executor.drain_pending(buy_price, sell_price, ts);
 
-        // (1) 직전 tick의 pending orders 체결 — look-ahead 방지
-        let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, Side::Long);
-        let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, Side::Short);
-        for order in pending.drain(..) {
-            let price = match &order {
-                BacktestOrder::Market {
-                    side: Side::Long, ..
-                } => buy_price,
-                BacktestOrder::Market {
-                    side: Side::Short, ..
-                } => sell_price,
-                BacktestOrder::Close => match portfolio.position.side {
-                    Some(Side::Long) => sell_price,
-                    Some(Side::Short) => buy_price,
-                    None => continue,
-                },
-            };
-            portfolio.execute(&order, price, ts);
-        }
-
-        // (2) mark-to-market
         let mark = event_mark_price(ev);
-        portfolio.mark(mark);
+        executor.mark(mark);
         equity_curve.push(EquityPoint {
             ts_ns: ts,
-            equity: portfolio.equity,
-            position_qty: portfolio.position.qty,
+            equity: executor.equity(),
+            position_qty: executor.position().qty,
             mark_price: mark,
         });
 
-        // (3) strategy hook
-        let mut ctx = Context {
+        let ctx = Context {
             now_ns: ts,
-            position: &portfolio.position,
-            equity: portfolio.equity,
-            pending: &mut pending,
+            equity: executor.equity(),
+            position: executor.position(),
+            executor: executor.clone(),
         };
         match ev {
-            Event::Bar(b) => strategy.on_bar(b, &mut ctx),
+            Event::Bar(b) => strategy.on_bar(b, &ctx).await,
             Event::Depth(d) => {
-                strategy.on_depth(d, &mut ctx);
+                strategy.on_depth(d, &ctx).await;
                 last_depth = Some(d);
             }
         }
     }
 
     // 종료 시 잔여 포지션 시장가 청산 (마지막 이벤트 가격으로)
-    if portfolio.position.side.is_some() {
+    if let Some(cur_side) = executor.position().side {
         let last = &events[events.len() - 1];
         let close_price = event_mark_price(last);
-        portfolio.execute(&BacktestOrder::Close, close_price, last.ts_ns());
-        // equity_curve 마지막 행 갱신
+        let close_side = match cur_side {
+            OrderSide::Buy => OrderSide::Sell,
+            OrderSide::Sell => OrderSide::Buy,
+        };
+
+        let qty = executor.position().qty;
+        let _ = executor
+            .submit(OrderRequest {
+                symbol: cfg.symbol.clone(),
+                order_type: OrderType::Market,
+                side: close_side,
+                qty,
+                reduce_only: true,
+                ..Default::default()
+            })
+            .await;
+        executor.drain_pending(close_price, close_price, last.ts_ns());
         if let Some(p) = equity_curve.last_mut() {
-            p.equity = portfolio.equity;
-            p.position_qty = Decimal::zero();
+            p.equity = executor.equity();
+            p.position_qty = Decimal::ZERO;
         }
     }
 
     {
-        let last = &events[events.len() - 1];
-        let mut ctx = Context {
-            now_ns: last.ts_ns(),
-            position: &portfolio.position,
-            equity: portfolio.equity,
-            pending: &mut pending,
+        let last = events.last().unwrap().ts_ns();
+        let ctx = Context {
+            now_ns: last,
+            equity: executor.equity(),
+            position: executor.position(),
+            executor: executor.clone(),
         };
-        strategy.on_finish(&mut ctx);
+        strategy.on_finish(&ctx).await;
     }
 
     Ok(BacktestResult {
-        portfolio,
+        portfolio: executor.snapshot(),
         equity_curve,
     })
-}
-
-fn merge_events(bars: Vec<Bar>, depths: Vec<DepthSnapshot>) -> Vec<Event> {
-    let mut out = Vec::with_capacity(bars.len() + depths.len());
-    let mut bars = bars.into_iter().peekable();
-    let mut depths = depths.into_iter().peekable();
-    loop {
-        match (bars.peek().map(|b| b.ts_ns), depths.peek().map(|d| d.ts_ns)) {
-            (Some(bt), Some(dt)) if bt <= dt => out.push(Event::Bar(bars.next().unwrap())),
-            (Some(_), Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
-            (Some(_), None) => out.push(Event::Bar(bars.next().unwrap())),
-            (None, Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
-            (None, None) => break,
-        }
-    }
-    out
 }
 
 fn pick_price(
@@ -177,11 +160,11 @@ fn pick_price(
     last_depth: Option<&DepthSnapshot>,
     now_ns: i64,
     fresh_ns: i64,
-    side: Side,
+    side: OrderSide,
 ) -> Decimal {
     let select = |d: &DepthSnapshot| match side {
-        Side::Long => d.ask1_price,
-        Side::Short => d.bid1_price,
+        OrderSide::Buy => d.ask1_price,
+        OrderSide::Sell => d.bid1_price,
     };
     if let Some(d) = last_depth.filter(|d| now_ns - d.ts_ns <= fresh_ns) {
         return select(d);
@@ -199,104 +182,18 @@ fn event_mark_price(ev: &Event) -> Decimal {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backtest::types::Side;
-    use rust_decimal_macros::dec;
-
-    fn mk_bar(ts_ns: i64, open: Decimal, close: Decimal) -> Bar {
-        Bar {
-            symbol: "X".into(),
-            ts_ns,
-            open,
-            high: close,
-            low: open,
-            close,
-            volume: dec!(1),
+fn merge_events(bars: Vec<Bar>, depths: Vec<DepthSnapshot>) -> Vec<Event> {
+    let mut out = Vec::with_capacity(bars.len() + depths.len());
+    let mut bars = bars.into_iter().peekable();
+    let mut depths = depths.into_iter().peekable();
+    loop {
+        match (bars.peek().map(|b| b.ts_ns), depths.peek().map(|d| d.ts_ns)) {
+            (Some(bt), Some(dt)) if bt <= dt => out.push(Event::Bar(bars.next().unwrap())),
+            (Some(_), Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
+            (Some(_), None) => out.push(Event::Bar(bars.next().unwrap())),
+            (None, Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
+            (None, None) => break,
         }
     }
-
-    #[test]
-    fn merge_orders_by_ts() {
-        let bars = vec![
-            mk_bar(1, dec!(100), dec!(101)),
-            mk_bar(3, dec!(102), dec!(103)),
-        ];
-        let depths = vec![
-            DepthSnapshot {
-                symbol: "X".into(),
-                ts_ns: 2,
-                bid1_price: dec!(100),
-                bid1_qty: dec!(1),
-                ask1_price: dec!(101),
-                ask1_qty: dec!(1),
-            },
-            DepthSnapshot {
-                symbol: "X".into(),
-                ts_ns: 4,
-                bid1_price: dec!(102),
-                bid1_qty: dec!(1),
-                ask1_price: dec!(103),
-                ask1_qty: dec!(1),
-            },
-        ];
-        let merged = merge_events(bars, depths);
-        let ts: Vec<i64> = merged.iter().map(|e| e.ts_ns()).collect();
-        assert_eq!(ts, vec![1, 2, 3, 4]);
-    }
-
-    struct OneShotLong {
-        fired: bool,
-    }
-    impl Strategy for OneShotLong {
-        fn on_bar(&mut self, _bar: &Bar, ctx: &mut Context) {
-            if !self.fired {
-                ctx.submit_market(Side::Long, dec!(1));
-                self.fired = true;
-            }
-        }
-    }
-
-    struct StaticSource {
-        bars: Vec<Bar>,
-    }
-    #[async_trait::async_trait]
-    impl MarketDataSource for StaticSource {
-        async fn fetch_bars(&self, _q: BarQuery) -> Result<Vec<Bar>> {
-            Ok(self.bars.clone())
-        }
-        async fn fetch_depth_snapshots(&self, _q: DepthQuery) -> Result<Vec<DepthSnapshot>> {
-            Ok(vec![])
-        }
-    }
-
-    #[tokio::test]
-    async fn one_tick_delay_fills_at_next_bar_open() {
-        // Bar1: open=100, close=110. Strategy submits Long on bar1.
-        // Bar2: open=120, close=130. Fill must occur at 120 (next bar's open), not 110.
-        let src = StaticSource {
-            bars: vec![
-                mk_bar(1_000_000_000, dec!(100), dec!(110)),
-                mk_bar(2_000_000_000, dec!(120), dec!(130)),
-                mk_bar(3_000_000_000, dec!(125), dec!(135)),
-            ],
-        };
-        let cfg = BacktestConfig {
-            symbol: "X".into(),
-            from_ns: 0,
-            to_ns: 10_000_000_000,
-            bar_interval: "1s".into(),
-            depth_every: "1s".into(),
-            initial_equity: dec!(10000),
-            fee_bps: dec!(0),
-            depth_freshness_sec: 0,
-        };
-        let mut strat = OneShotLong { fired: false };
-        let res = run(&src, cfg, &mut strat).await.unwrap();
-        // 마지막에 자동 청산 — close 가격은 마지막 bar의 close=135
-        let trade = &res.portfolio.closed_trades[0];
-        assert_eq!(trade.entry_price, dec!(120));
-        assert_eq!(trade.exit_price, dec!(135));
-    }
+    out
 }

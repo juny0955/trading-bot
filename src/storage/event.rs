@@ -1,4 +1,5 @@
 use crate::market_data::binance::dto::StreamData;
+use crate::order::types::Fill;
 use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 
 pub enum StorageEvent {
@@ -8,6 +9,7 @@ pub enum StorageEvent {
     Kline(KlineData),
     MarkPrice(MarkPriceData),
     Fng(FngData),
+    Fill(Fill),
 }
 
 impl From<StreamData> for StorageEvent {

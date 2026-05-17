@@ -1,6 +1,6 @@
 use crate::backtest::engine::{BacktestResult, EquityPoint};
 use crate::backtest::portfolio::ClosedTrade;
-use crate::backtest::types::Side;
+use crate::order::types::OrderSide;
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
@@ -137,9 +137,9 @@ fn max_drawdown_pct(curve: &[EquityPoint]) -> Decimal {
     max_dd
 }
 
-fn side_str(s: Side) -> &'static str {
+fn side_str(s: OrderSide) -> &'static str {
     match s {
-        Side::Long => "long",
-        Side::Short => "short",
+        OrderSide::Buy => "long",
+        OrderSide::Sell => "short",
     }
 }

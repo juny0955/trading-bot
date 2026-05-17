@@ -1,3 +1,4 @@
+use crate::order::types::OrderSide;
 use rust_decimal::Decimal;
 
 #[derive(Debug, Clone)]
@@ -22,30 +23,9 @@ pub struct DepthSnapshot {
     // L2~L10은 v2. v1은 L1만 사용.
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    Long,
-    Short,
-}
-
-#[derive(Debug, Clone)]
-pub enum BacktestOrder {
-    Market { side: Side, qty: Decimal },
-    Close,
-}
-
-#[derive(Debug, Clone)]
-pub struct Fill {
-    pub ts_ns: i64,
-    pub side: Side,
-    pub qty: Decimal,
-    pub price: Decimal,
-    pub fee: Decimal,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Position {
-    pub side: Option<Side>,
+    pub side: Option<OrderSide>,
     pub qty: Decimal,
     pub entry_price: Decimal,
     pub entry_ts: i64,
