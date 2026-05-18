@@ -1,6 +1,7 @@
-use crate::binance::dto::StreamData;
+use crate::binance::StreamData;
+use crate::binance::dto::{BookTickerData, DepthData, KlineData, MarkPriceData, TradeData};
+use crate::market_data::alternative::dto::FngData;
 use crate::order::types::Fill;
-use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 
 pub enum StorageEvent {
     Trade(TradeData),

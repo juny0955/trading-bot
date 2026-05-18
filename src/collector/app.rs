@@ -1,12 +1,10 @@
-use crate::binance::BinanceConfig;
-use crate::binance::dto::StreamData;
-use crate::binance::market_stream::subscribe_to_binance_futures_stream;
+use crate::binance::{BinanceConfig, StreamData, subscribe_to_binance_futures_stream};
 use crate::config::{AlternativeRuntimeConfig, BinanceRuntimeConfig, SharedConfig};
+use crate::market_data::alternative::dto::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
 use crate::storage::config_db::{init_db, load_config};
 use crate::storage::event::StorageEvent;
 use crate::storage::questdb::writer;
-use crate::types::FngData;
 use anyhow::Result;
 use futures_util::future::join_all;
 use tokio::sync::mpsc;
