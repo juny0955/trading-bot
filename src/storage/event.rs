@@ -1,4 +1,4 @@
-use crate::market_data::binance::dto::StreamData;
+use crate::binance::dto::StreamData;
 use crate::order::types::Fill;
 use crate::types::{BookTickerData, DepthData, FngData, KlineData, MarkPriceData, TradeData};
 

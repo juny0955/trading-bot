@@ -1,0 +1,4 @@
+edition = "2024"
+tap_spaces = 4
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"

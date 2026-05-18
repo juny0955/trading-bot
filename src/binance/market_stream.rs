@@ -1,7 +1,7 @@
 use std::time::Duration;
 
+use crate::binance::dto::{StreamData, StreamEnvelope};
 use crate::config::BinanceRuntimeConfig;
-use crate::market_data::binance::dto::{StreamData, StreamEnvelope};
 use anyhow::{Context, Result, anyhow};
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::timeout;
@@ -13,7 +13,7 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-pub async fn subscribe_to_binance_futures_ws(
+pub async fn subscribe_to_binance_futures_stream(
     url: String,
     stream_type: &str,
     runtime_cfg: BinanceRuntimeConfig,

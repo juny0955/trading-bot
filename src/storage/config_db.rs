@@ -1,5 +1,6 @@
-use crate::config::{
-    AppConfig, BinanceConfig, BinanceNet, RuntimeConfig, StreamConfig, StreamType, SymbolConfig,
+use crate::{
+    binance::{BinanceConfig, BinanceNet, StreamConfig, StreamType, SymbolConfig},
+    config::{AppConfig, RuntimeConfig},
 };
 use anyhow::{Result, bail};
 use sqlx::{PgPool, query};

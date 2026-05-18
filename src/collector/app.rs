@@ -1,7 +1,8 @@
-use crate::config::{AlternativeRuntimeConfig, BinanceConfig, BinanceRuntimeConfig, SharedConfig};
+use crate::binance::BinanceConfig;
+use crate::binance::dto::StreamData;
+use crate::binance::market_stream::subscribe_to_binance_futures_stream;
+use crate::config::{AlternativeRuntimeConfig, BinanceRuntimeConfig, SharedConfig};
 use crate::market_data::alternative::fng::fetch_alternative_fng;
-use crate::market_data::binance::data_ws::subscribe_to_binance_futures_ws;
-use crate::market_data::binance::dto::StreamData;
 use crate::storage::config_db::{init_db, load_config};
 use crate::storage::event::StorageEvent;
 use crate::storage::questdb::writer;
@@ -128,12 +129,13 @@ fn spawn_binance(
     let stx = stream_tx.clone();
     let t = token.clone();
     handles.push(tokio::spawn(async move {
-        subscribe_to_binance_futures_ws(public_url, "Public", rc, stx, t).await
+        subscribe_to_binance_futures_stream(public_url, "Public", rc, stx, t).await
     }));
 
     let market_url = cfg.market_ws_url();
     handles.push(tokio::spawn(async move {
-        subscribe_to_binance_futures_ws(market_url, "Market", runtime_cfg, stream_tx, token).await
+        subscribe_to_binance_futures_stream(market_url, "Market", runtime_cfg, stream_tx, token)
+            .await
     }));
 
     handles.push(tokio::spawn(async move {

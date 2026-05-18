@@ -1,4 +1,5 @@
 pub mod backtest;
+pub mod binance;
 pub mod collector;
 pub mod config;
 pub mod init;
