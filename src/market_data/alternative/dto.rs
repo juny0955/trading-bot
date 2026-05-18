@@ -1,3 +1,5 @@
+use crate::market_data::event::MarketDataEvent;
+use crate::market_data::types::FearGreed;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -39,4 +41,20 @@ pub struct FngData {
     pub status: FngStatus,
     pub timestamp: String,
     pub time_until_update: String,
+}
+
+impl From<FngData> for FearGreed {
+    fn from(value: FngData) -> Self {
+        Self {
+            value: value.value,
+            status: value.status.as_str().to_string(),
+            timestamp_sec: value.timestamp.parse().unwrap_or(0),
+        }
+    }
+}
+
+impl From<FngData> for MarketDataEvent {
+    fn from(value: FngData) -> Self {
+        Self::FearGreed(value.into())
+    }
 }

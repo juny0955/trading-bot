@@ -2,8 +2,8 @@ use crate::binance::{BinanceConfig, StreamData, subscribe_to_binance_futures_str
 use crate::config::{AlternativeRuntimeConfig, BinanceRuntimeConfig, SharedConfig};
 use crate::market_data::alternative::dto::FngData;
 use crate::market_data::alternative::fng::fetch_alternative_fng;
-use crate::storage::config_db::{init_db, load_config};
-use crate::storage::event::MarketDataEvent;
+use crate::market_data::event::MarketDataEvent;
+use crate::storage::postgres::config::{init_db, load_config};
 use crate::storage::questdb::writer;
 use anyhow::Result;
 use futures_util::future::join_all;

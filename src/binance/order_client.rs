@@ -15,11 +15,11 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::order::types::Fill;
+use crate::storage::postgres::order::OrderStorage;
 use crate::{
     binance::signing::{sign, timestamp_ms},
     order::{
         executor::OrderExecutor,
-        storage::OrderStorage,
         types::{Order, OrderError, OrderRequest, OrderStatus},
     },
 };

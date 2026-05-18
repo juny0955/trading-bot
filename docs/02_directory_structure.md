@@ -44,7 +44,8 @@ trading-bot/
 
 ### 4. 데이터 접근 계층 (Persistence Layer)
 - **`src/storage/questdb/`**: 고성능 시계열 데이터 저장을 담당합니다. `mpsc` 채널로 들어오는 이벤트를 버퍼링하여 QuestDB에 효율적으로 Flush합니다.
-- **`src/storage/config_db.rs`**: PostgreSQL을 사용하여 봇의 설정 정보(구독할 심볼 리스트 등)를 관리합니다.
+- **`src/storage/postgres/config.rs`**: PostgreSQL을 사용하여 봇의 설정 정보(구독할 심볼 리스트 등)를 관리합니다.
+- **`src/storage/postgres/order.rs`**: PostgreSQL 기반 주문/체결 저장소를 담당합니다.
 
 ### 5. 도메인 모델 및 유틸리티 (Domain & Utils)
 - **`src/types.rs`**: 프로젝트 전체에서 사용되는 핵심 데이터 타입을 정의합니다.

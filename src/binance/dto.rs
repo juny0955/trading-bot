@@ -1,3 +1,6 @@
+use crate::market_data;
+use crate::market_data::event::MarketDataEvent;
+use crate::market_data::types::{BookTicker, Depth, Kline, MarkPrice, Trade};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -117,4 +120,95 @@ pub struct MarkPriceData {
     pub funding_rate: Decimal,
     #[serde(rename = "T")]
     pub next_funding_time: i64,
+}
+
+impl From<TradeData> for Trade {
+    fn from(value: TradeData) -> Self {
+        Trade {
+            symbol: value.symbol,
+            price: value.price,
+            quantity: value.quantity,
+            time_ns: value.time * 1_000_000,
+            buyer_is_market_maker: value.buyer_is_market_maker,
+        }
+    }
+}
+impl From<DepthData> for Depth {
+    fn from(value: DepthData) -> Self {
+        Depth {
+            symbol: value.symbol,
+            first_update_id: value.first_update_id,
+            last_update_id: value.last_update_id,
+            bids: value
+                .bids
+                .iter()
+                .map(|p| market_data::types::PriceLevel {
+                    price: p.0,
+                    quantity: p.1,
+                })
+                .collect(),
+            asks: value
+                .asks
+                .iter()
+                .map(|p| market_data::types::PriceLevel {
+                    price: p.0,
+                    quantity: p.1,
+                })
+                .collect(),
+            event_time_ns: value.event_time * 1_000_000,
+        }
+    }
+}
+impl From<BookTickerData> for BookTicker {
+    fn from(value: BookTickerData) -> Self {
+        BookTicker {
+            symbol: value.symbol,
+            bid_price: value.bid_price,
+            bid_quantity: value.bid_quantity,
+            ask_price: value.ask_price,
+            ask_quantity: value.ask_quantity,
+            event_time_ns: value.event_time * 1_000_000,
+        }
+    }
+}
+impl From<KlineData> for Kline {
+    fn from(value: KlineData) -> Self {
+        Kline {
+            symbol: value.symbol,
+            event_time_ns: value.event_time * 1_000_000,
+            open_time_ms: value.kline.open_time,
+            open: value.kline.open,
+            high: value.kline.high,
+            low: value.kline.low,
+            close: value.kline.close,
+            volume: value.kline.volume,
+            quote_volume: value.kline.quote_volume,
+            num_trades: value.kline.num_trades,
+            is_closed: value.kline.is_closed,
+        }
+    }
+}
+impl From<MarkPriceData> for MarkPrice {
+    fn from(value: MarkPriceData) -> Self {
+        MarkPrice {
+            symbol: value.symbol,
+            event_time_ns: value.event_time * 1_000_000,
+            mark_price: value.mark_price,
+            index_price: value.index_price,
+            funding_rate: value.funding_rate,
+            next_funding_time_ms: value.next_funding_time,
+        }
+    }
+}
+
+impl From<StreamData> for MarketDataEvent {
+    fn from(value: StreamData) -> Self {
+        match value {
+            StreamData::Trade(d) => MarketDataEvent::Trade(d.into()),
+            StreamData::Depth(d) => MarketDataEvent::Depth(d.into()),
+            StreamData::BookTicker(d) => MarketDataEvent::BookTicker(d.into()),
+            StreamData::Kline(d) => MarketDataEvent::Kline(d.into()),
+            StreamData::MarkPrice(d) => MarketDataEvent::MarkPrice(d.into()),
+        }
+    }
 }
