@@ -2,12 +2,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use trading_bot::backtest::data::{BarQuery, DepthQuery, MarketDataSource};
-use trading_bot::backtest::engine::{self, BacktestConfig};
-use trading_bot::backtest::strategy::{Context, Strategy};
-use trading_bot::backtest::types::{Bar, DepthSnapshot};
-use trading_bot::order::executor::OrderExecutor;
-use trading_bot::order::types::{OrderRequest, OrderSide, OrderType};
+use trading_bot::application::backtest::engine::{self, BacktestConfig};
+use trading_bot::application::backtest::strategy::{Context, Strategy};
+use trading_bot::domain::backtest::{Bar, DepthSnapshot};
+use trading_bot::domain::order::{OrderRequest, OrderSide, OrderType};
+use trading_bot::ports::market_data_source::{BarQuery, DepthQuery, MarketDataSource};
+use trading_bot::ports::order_executor::OrderExecutor;
 
 struct LinearSource {
     bars: Vec<Bar>,
@@ -60,7 +60,7 @@ async fn buy_and_hold_golden_pnl() {
             let close = dec!(100) + step;
             Bar {
                 symbol: "X".into(),
-                ts_ns: (i as i64 + 1) * 1_000_000_000,
+                ts_ns: (i + 1) * 1_000_000_000,
                 open: close,
                 high: close,
                 low: close,

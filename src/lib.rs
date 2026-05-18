@@ -1,8 +1,6 @@
-pub mod backtest;
-pub mod binance;
-pub mod collector;
+pub mod adapters;
+pub mod application;
 pub mod config;
+pub mod domain;
 pub mod init;
-pub mod market_data;
-pub mod order;
-pub mod storage;
+pub mod ports;
