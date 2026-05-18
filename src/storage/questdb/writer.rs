@@ -2,7 +2,7 @@ use crate::binance::dto::{BookTickerData, DepthData, KlineData, MarkPriceData, T
 use crate::config::QuestDbRuntimeConfig;
 use crate::market_data::alternative::dto::FngData;
 use crate::order::types::Fill;
-use crate::storage::event::StorageEvent;
+use crate::storage::event::MarketDataEvent;
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 pub async fn run(
     url: &str,
     cfg: QuestDbRuntimeConfig,
-    mut rx: Receiver<StorageEvent>,
+    mut market_rx: Receiver<MarketDataEvent>,
     token: CancellationToken,
 ) {
     let mut sender = match Sender::from_conf(url) {
@@ -32,7 +32,7 @@ pub async fn run(
 
     loop {
         tokio::select! {
-            maybe = rx.recv() => {
+            maybe = market_rx.recv() => {
                 let Some(event) = maybe else {
                     flush_if_any(&mut sender, &mut buf, &mut rows, url, "shutdown");
                     info!("DB writer 종료");
@@ -40,19 +40,18 @@ pub async fn run(
                 };
 
                 let result = match &event {
-                    StorageEvent::Trade(d) => append_trade(&mut buf, d),
-                    StorageEvent::Depth(d) => append_depth(&mut buf, d),
-                    StorageEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
-                    StorageEvent::Kline(d) => append_kline(&mut buf, d),
-                    StorageEvent::MarkPrice(d) => append_mark_price(&mut buf, d),
-                    StorageEvent::Fng(d) => append_fng(&mut buf, d),
-                    StorageEvent::Fill(d) => append_fill(&mut buf, d),
+                    MarketDataEvent::Trade(d) => append_trade(&mut buf, d),
+                    MarketDataEvent::Depth(d) => append_depth(&mut buf, d),
+                    MarketDataEvent::BookTicker(d) => append_book_ticker(&mut buf, d),
+                    MarketDataEvent::Kline(d) => append_kline(&mut buf, d),
+                    MarketDataEvent::MarkPrice(d) => append_mark_price(&mut buf, d),
+                    MarketDataEvent::Fng(d) => append_fng(&mut buf, d),
                 };
 
                 match result {
                     Ok(()) => rows += 1,
                     Err(e) => {
-                        warn!("append 실패 누적 buffer 폐기: {e}");
+                        warn!("Market data append 실패 누적 buffer 폐기: {e}");
                         buf.clear();
                         rows = 0;
                     }
@@ -200,7 +199,7 @@ fn append_fng(buf: &mut Buffer, d: &FngData) -> questdb::Result<()> {
     Ok(())
 }
 
-fn append_fill(buf: &mut Buffer, d: &Fill) -> questdb::Result<()> {
+fn _append_fill(buf: &mut Buffer, d: &Fill) -> questdb::Result<()> {
     buf.table("fill")?
         .symbol("symbol", &d.symbol)?
         .symbol("side", &format!("{:?}", d.side).to_lowercase())?

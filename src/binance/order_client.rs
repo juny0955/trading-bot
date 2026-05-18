@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::order::types::Fill;
 use crate::{
     binance::signing::{sign, timestamp_ms},
     order::{
@@ -21,7 +22,6 @@ use crate::{
         storage::OrderStorage,
         types::{Order, OrderError, OrderRequest, OrderStatus},
     },
-    storage::event::StorageEvent,
 };
 
 pub struct LiveOrderExecutor {
@@ -35,7 +35,7 @@ pub struct LiveOrderExecutor {
     pub(crate) pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
 
     pub(crate) storage: OrderStorage,
-    pub(crate) db_tx: Sender<StorageEvent>,
+    pub(crate) fill_tx: Sender<Fill>,
 }
 
 #[async_trait]
@@ -217,7 +217,7 @@ impl LiveOrderExecutor {
         api_key: String,
         secret: String,
         pool: PgPool,
-        db_tx: Sender<StorageEvent>,
+        fill_tx: Sender<Fill>,
         testnet: bool,
     ) -> (Arc<Self>, Receiver<String>) {
         let (ws_tx, ws_rx) = mpsc::channel(100);
@@ -246,7 +246,7 @@ impl LiveOrderExecutor {
             user_stream_base,
             rest_base,
             ws_tx,
-            db_tx,
+            fill_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             storage: OrderStorage::new(pool),
         });

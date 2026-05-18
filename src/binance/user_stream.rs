@@ -13,7 +13,6 @@ use tracing::{error, info, warn};
 use crate::{
     binance::LiveOrderExecutor,
     order::types::{Fill, OrderSide, OrderStatus},
-    storage::event::StorageEvent,
 };
 
 impl LiveOrderExecutor {
@@ -147,7 +146,7 @@ impl LiveOrderExecutor {
             if let Err(e) = self.storage.record_fill(&fill).await {
                 error!("Fill PG 저장 실패 (orderId={}): {e}", exchange_order_id);
             }
-            if let Err(e) = self.db_tx.send(StorageEvent::Fill(fill)).await {
+            if let Err(e) = self.fill_tx.send(fill).await {
                 warn!("Fill QuestDB 채널 전송 실패: {e}");
             }
 

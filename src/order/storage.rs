@@ -14,20 +14,20 @@ impl OrderStorage {
     pub async fn upsert_order(&self, order: &Order) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-             INSERT INTO orders (
-                 id, client_order_id, exchange_order_id, symbol,
-                 order_type, side, status, qty, price, stop_price,
-                 filled_qty, avg_fill_price, time_in_force,
-                 reduce_only, post_only, created_at, updated_at
-             )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-             ON CONFLICT (id) DO UPDATE SET
-                 exchange_order_id = EXCLUDED.exchange_order_id,
-                 status            = EXCLUDED.status,
-                 filled_qty        = EXCLUDED.filled_qty,
-                 avg_fill_price    = EXCLUDED.avg_fill_price,
-                 updated_at        = EXCLUDED.updated_at
-             "#,
+            INSERT INTO orders (
+                id, client_order_id, exchange_order_id, symbol,
+                order_type, side, status, qty, price, stop_price,
+                filled_qty, avg_fill_price, time_in_force,
+                reduce_only, post_only, created_at, updated_at
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+            ON CONFLICT (id) DO UPDATE SET
+                exchange_order_id = EXCLUDED.exchange_order_id,
+                status            = EXCLUDED.status,
+                filled_qty        = EXCLUDED.filled_qty,
+                avg_fill_price    = EXCLUDED.avg_fill_price,
+                updated_at        = EXCLUDED.updated_at
+            "#,
         )
         .bind(order.id)
         .bind(&order.client_order_id)
@@ -54,11 +54,11 @@ impl OrderStorage {
     pub async fn record_fill(&self, fill: &Fill) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-             INSERT INTO fills (
-                 order_id, symbol, side, qty, price, fee, fee_asset, filled_at
-             )
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-             "#,
+            INSERT INTO fills (
+                order_id, symbol, side, qty, price, fee, fee_asset, filled_at
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            "#,
         )
         .bind(fill.order_id)
         .bind(&fill.symbol)
