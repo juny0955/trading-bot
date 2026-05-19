@@ -8,6 +8,22 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
 
+fn bar_interval_to_sample_by(i: crate::ports::market_data_source::BarInterval) -> String {
+    use crate::ports::market_data_source::BarInterval;
+    match i {
+        BarInterval::Sec(n) => format!("{n}s"),
+        BarInterval::Min(n) => format!("{n}m"),
+        BarInterval::Hour(n) => format!("{n}h"),
+    }
+}
+
+fn depth_interval_to_sample_by(i: crate::ports::market_data_source::DepthSampleInterval) -> String {
+    use crate::ports::market_data_source::DepthSampleInterval;
+    match i {
+        DepthSampleInterval::Sec(n) => format!("{n}s"),
+    }
+}
+
 pub struct QuestDbRestDataSource {
     base_url: String,
     client: Client,
@@ -41,7 +57,7 @@ impl MarketDataSource for QuestDbRestDataSource {
             sym = q.symbol,
             from = from_iso,
             to = to_iso,
-            interval = q.interval.to_questdb_sample_by(),
+            interval = bar_interval_to_sample_by(q.interval),
         );
 
         let resp = self.exec(&sql).await?;
@@ -78,7 +94,7 @@ impl MarketDataSource for QuestDbRestDataSource {
             sym = q.symbol,
             from = from_iso,
             to = to_iso,
-            every = q.every.to_questdb_sample_by(),
+            every = depth_interval_to_sample_by(q.every),
         );
 
         let resp = self.exec(&sql).await?;

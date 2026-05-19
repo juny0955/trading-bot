@@ -1,12 +1,12 @@
 use crate::application::order_execution_event::OrderExecutionEvent;
-use crate::domain::order::{Fill, OrderError, OrderSide, OrderStatus};
 use crate::ports::fill_sink::FillSink;
 use crate::ports::order_repository::OrderRepository;
 use chrono::Utc;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+use crate::domain::order::Fill;
 
 pub struct AccountEventHandler {
     repo: Arc<dyn OrderRepository>,
@@ -75,5 +75,12 @@ impl AccountEventHandler {
                 error!("ORDER_TRADE_UPDATE 주문 갱신 실패: {e}");
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl FillSink for Sender<Fill> {
+    async fn emit(&self, fill: Fill) {
+        let _ = self.send(fill).await;
     }
 }

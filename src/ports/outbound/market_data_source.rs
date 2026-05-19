@@ -9,16 +9,6 @@ pub enum BarInterval {
     Hour(u32),
 }
 
-impl BarInterval {
-    pub fn to_questdb_sample_by(self) -> String {
-        match self {
-            BarInterval::Sec(n) => format!("{n}s"),
-            BarInterval::Min(n) => format!("{n}m"),
-            BarInterval::Hour(n) => format!("{n}h"),
-        }
-    }
-}
-
 impl std::str::FromStr for BarInterval {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -39,14 +29,6 @@ impl std::str::FromStr for BarInterval {
 #[derive(Debug, Clone, Copy)]
 pub enum DepthSampleInterval {
     Sec(u32),
-}
-
-impl DepthSampleInterval {
-    pub fn to_questdb_sample_by(self) -> String {
-        match self {
-            DepthSampleInterval::Sec(n) => format!("{n}s"),
-        }
-    }
 }
 
 impl std::str::FromStr for DepthSampleInterval {
