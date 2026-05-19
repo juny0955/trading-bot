@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::adapters::alternative::dto::{FngData, FngResponse};
+use crate::adapters::inbound::alternative::dto::{FngData, FngResponse};
 use crate::config::AlternativeRuntimeConfig;
 use crate::domain::event::MarketDataEvent;
 use crate::ports::fng_feed::FngFeed;

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::adapters::binance::dto::{StreamData, StreamEnvelope};
+use crate::adapters::inbound::binance::dto::{StreamData, StreamEnvelope};
 use crate::config::BinanceRuntimeConfig;
 use crate::config::binance_config::BinanceConfig;
 use crate::domain::event::MarketDataEvent;

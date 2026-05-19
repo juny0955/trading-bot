@@ -2,6 +2,20 @@
 
 이 문서는 `trading-bot` 프로젝트의 주요 변경 사항 및 업데이트 내역을 기록합니다.
 
+## [v0.2.0] - 2026-05-19
+
+### 🏗️ 아키텍처 개편 (Architectural Changes)
+- **헥사고날 아키텍처(Hexagonal Architecture) 도입**: 기존 레이어드 아키텍처에서 Ports & Adapters 구조로 전면 전환되었습니다.
+- **모듈 재구성**: `adapters`, `application`, `domain`, `ports` 모듈로 코드를 분리하여 관심사 분리(SoC)를 강화하였습니다.
+- **도메인 모델 정비**: `Trade`, `Depth`, `Kline` 등 도메인 엔티티 명칭을 표준화하고 `MarketDataEvent`를 통한 통합 이벤트 처리를 구현하였습니다.
+
+### ✨ 새로운 기능 (Features)
+- **트레이더 바이너리 추가**: 실제 전략을 구동하고 거래를 수행하는 `trader` 실행 파일이 추가되었습니다. (`src/bin/trader.rs`)
+- **인바운드/아웃바운드 포트 정의**: `LiveMarketFeed`, `MarketDataSink`, `OrderExecutor` 등 외부 연동을 위한 인터페이스(Port)를 정의하였습니다.
+
+### ⚙️ 기타 변경 사항 (Chores)
+- **문서 최신화**: 프로젝트의 구조적 변화에 맞춰 모든 가이드 문서(01~04, README)를 업데이트하였습니다.
+
 ## [v0.1.0] - 2026-05-17
 
 ### ✨ 새로운 기능 (Features)

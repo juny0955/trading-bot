@@ -10,30 +10,34 @@
 ## 🧩 주요 도메인 엔티티 (Entities)
 
 ### 1. 시장 데이터 (Market Data)
-데이터 수집 및 백테스트에서 사용되는 핵심 데이터 모델입니다.
-- **TradeData**: 개별 체결 데이터 (가격, 수량, 체결 시간, 메이커 여부)
-- **DepthData**: 호가창 데이터 (Bids/Asks 각 10단계의 가격 및 잔량)
-- **KlineData**: 캔들 데이터 (시가, 고가, 저가, 종가, 거래량)
-- **MarkPriceData**: 시장 평균가 및 펀딩 비율 정보
-- **FngData**: Alternative.me에서 제공하는 Fear & Greed Index (공포/탐욕 지수)
+`src/domain/market_data.rs`에 정의된 핵심 데이터 모델입니다.
+- **Trade**: 개별 체결 데이터 (가격, 수량, 체결 시간, 메이커 여부)
+- **Depth**: 호가창 데이터 (Bids/Asks 각 단계의 가격 및 잔량)
+- **BookTicker**: 최우선 매수/매도 호가 및 수량 (Best Bid/Ask)
+- **Kline**: 캔들 데이터 (시가, 고가, 저가, 종가, 거래량 등)
+- **MarkPrice**: 시장 평균가 및 펀딩 비율 정보
+- **FearGreed**: Alternative.me에서 제공하는 공포/탐욕 지수
 
 ### 2. 주문 및 포트폴리오 (Order & Portfolio)
-거래 시뮬레이션 및 실거래 관리에 사용되는 모델입니다.
-- **OrderRequest**: 주문 요청 (심볼, 사이드, 타입, 수량, 가격 등)
-- **Fill**: 체결 결과 (체결가, 체결 수량, 수수료, 체결 시각)
-- **Position**: 현재 보유 중인 포지션 정보 (수량, 진입가, 미실현 손익)
-- **PortfolioSnapshot**: 특정 시점의 자산 상태 (총 자산, 가용 증거금, 포지션 가치)
+`src/domain/order.rs` 및 `src/application/backtest/portfolio.rs`에서 관리되는 모델입니다.
+- **OrderRequest**: 주문 요청 (심볼, 사이드, 타입, 수량, 가격, TimeInForce 등)
+- **Order**: 시스템 내의 주문 상태를 나타내는 모델 (ID, 상태, 체결 수량, 평균 체결가 등)
+- **Fill**: 실제 체결된 결과 (체결가, 체결 수량, 수수료, 체결 시각)
+- **Position**: 현재 보유 중인 포지션 정보 (방향, 수량, 진입가, 진입 시각)
+
+### 3. 통합 이벤트 (Events)
+- **MarketDataEvent**: 다양한 시장 데이터를 하나의 열거형(Enum)으로 통합하여 처리 효율성을 높입니다.
 
 ## 💡 핵심 비즈니스 로직
 
 ### 데이터 수집 (Collection)
-- **다중 소스 동기화**: 여러 WebSocket 스트림을 동시에 구독하면서도, 네트워크 불안정 시 자동 재연결 로직을 통해 데이터의 연속성을 보장합니다.
-- **배치 저장**: 매 데이터 발생 시마다 DB에 쓰지 않고, 설정된 시간(ms) 또는 데이터 개수(rows) 단위로 배칭하여 QuestDB의 InfluxDB Line Protocol을 통해 고속으로 저장합니다.
+- **인바운드 포트(LiveMarketFeed)**: 외부 거래소의 실시간 스트림을 구독합니다.
+- **아웃바운드 포트(MarketDataSink)**: 수집된 데이터를 QuestDB 등 저장소에 배치(Batch) 방식으로 저장하여 고속 쓰기를 실현합니다.
 
 ### 백테스트 엔진 (Backtest Engine)
-- **이벤트 병합(Event Merging)**: 서로 다른 테이블에서 가져온 캔들 데이터와 호가 데이터를 타임스탬프 기준으로 정렬하여 하나의 이벤트 스트림으로 통합합니다.
-- **전략 인터페이스(Strategy Interface)**: 사용자는 `on_bar`, `on_depth` 등의 핸들러를 구현하여 자신만의 로직을 쉽게 작성할 수 있습니다.
-- **체결 시뮬레이션**: 주문이 들어오면 다음 들어오는 호가(Depth) 데이터의 Best Bid/Ask 가격을 확인하여 즉시 체결하거나, 지정가 주문의 경우 가격 도달 시 체결되는 로직을 수행합니다.
+- **이벤트 병합(Event Merging)**: 과거의 캔들 데이터와 호가 데이터를 타임스탬프 기준으로 정렬하여 실시간 상황과 유사한 이벤트 스트림을 재구성합니다.
+- **전략 인터페이스(Strategy Interface)**: `on_bar`, `on_depth` 등의 핸들러를 통해 전략 로직을 분리하여 구현할 수 있습니다.
+- **체결 시뮬레이션**: 호가창(Depth) 기반의 매칭 알고리즘을 사용하여 현실적인 슬리피지와 체결 지연을 시뮬레이션합니다.
 
 ---
 [메인으로 돌아가기](./README.md) | [02. 프로젝트 구조 분석](./02_directory_structure.md)

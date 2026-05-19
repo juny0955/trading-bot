@@ -1,6 +1,6 @@
 # 02. 프로젝트 구조 및 컴포넌트 분석
 
-이 문서는 `trading-bot` 프로젝트의 전체적인 폴더 구조와 각 컴포넌트의 책임을 상세히 분석합니다.
+이 문서는 `trading-bot` 프로젝트의 헥사고날 아키텍처(Hexagonal Architecture) 구조와 각 컴포넌트의 책임을 상세히 분석합니다.
 
 ## 📂 프로젝트 구조 (Tree)
 
@@ -10,15 +10,26 @@ trading-bot/
 ├── src/
 │   ├── bin/                # 실행 가능한 바이너리 엔트리 포인트
 │   │   ├── collector.rs    # 데이터 수집기 실행 파일
-│   │   └── backtest.rs     # 백테스터 실행 파일
-│   ├── collector/          # 데이터 수집 로직 (App 구동, 태스크 관리)
-│   ├── backtest/           # 백테스트 엔진 및 전략 구현체
-│   │   └── strategies/     # 개별 트레이딩 전략 정의
-│   ├── market_data/        # 외부 거래소 API 연동 (Binance, Alternative.me)
-│   ├── order/              # 주문 실행 및 포트폴리오 관리 (Live/Backtest 공통)
-│   ├── storage/            # 데이터 저장소 연동 (QuestDB, PostgreSQL)
+│   │   ├── backtest.rs     # 백테스터 실행 파일
+│   │   └── trader.rs       # 실거래 트레이더 실행 파일
+│   ├── adapters/           # 외부 시스템과의 연동 (Adapters)
+│   │   ├── binance/        # 바이낸스 API 및 WebSocket 연동
+│   │   ├── alternative/    # Alternative.me (F&G Index) 연동
+│   │   ├── questdb/        # QuestDB (ILP) 데이터 저장
+│   │   ├── questdb_rest/   # QuestDB (REST) 데이터 조회
+│   │   └── postgres/       # PostgreSQL 설정 및 주문 저장
+│   ├── application/        # 유즈케이스 및 서비스 로직 (Application)
+│   │   ├── collector.rs    # 수집기 오케스트레이션
+│   │   ├── trader.rs       # 트레이더 유즈케이스
+│   │   └── backtest/       # 백테스트 엔진 및 시뮬레이션
+│   ├── domain/             # 핵심 도메인 모델 및 비즈니스 규칙 (Domain)
+│   │   ├── market_data.rs  # 시장 데이터 엔티티
+│   │   ├── order.rs        # 주문 및 체결 엔티티
+│   │   └── strategies/     # 트레이딩 전략 정의
+│   ├── ports/              # 외부와의 상호작용 인터페이스 (Ports)
+│   │   ├── inbound/        # 입력 포트 (Feed 등)
+│   │   └── outbound/       # 출력 포트 (Sink, Repository, Executor 등)
 │   ├── config/             # 애플리케이션 설정 로직
-│   ├── types.rs            # 공통 데이터 구조체 정의
 │   ├── lib.rs              # 라이브러리 루트 및 모듈 선언
 │   └── init.rs             # 로깅 및 초기화 유틸리티
 ├── migrations/             # SQLx 데이터베이스 마이그레이션 파일
@@ -26,30 +37,29 @@ trading-bot/
 └── docker-compose.yml      # QuestDB, PostgreSQL 등 인프라 설정
 ```
 
-## 🏗️ 계층별 책임 상세 분석
+## 🏗️ 헥사고날 계층별 책임 상세 분석
 
-### 1. 엔트리 포인트 (Binary Layer)
-- **`src/bin/collector.rs`**: 수집기 앱을 구동합니다. 환경 변수 로드 및 비동기 런타임(`tokio`)을 시작합니다.
-- **`src/bin/backtest.rs`**: CLI 인자(전략명, 기간, 심볼 등)를 파싱하여 백테스트 엔진을 구동하고 결과를 리포트로 저장합니다.
+### 1. 도메인 계층 (Domain Layer) - Core
+- **책임**: 외부 프레임워크나 라이브러리에 의존하지 않는 순수한 비즈니스 모델과 규칙을 정의합니다.
+- **주요 컴포넌트**: `Trade`, `Order`, `Strategy` 트레이트 등.
 
-### 2. 애플리케이션 로직 (Application Layer)
-- **`src/collector/app.rs`**: 전체 수집 프로세스의 조율자입니다. 설정 로드, DB 라이터 실행, 각 거래소별 수집 태스크(Binance, Alt FNG)를 스폰(Spawn)하고 수명을 관리합니다.
-- **`src/backtest/engine.rs`**: 백테스트 시뮬레이션의 핵심 루프를 담당합니다. 데이터를 가져와 이벤트를 발생시키고 전략 핸들러를 호출합니다.
+### 2. 포트 계층 (Ports Layer) - Interfaces
+- **책임**: 애플리케이션 코어가 외부와 통신하기 위한 추상적인 인터페이스를 정의합니다.
+- **Inbound Ports**: 외부에서 코어로 들어오는 통로 (`LiveMarketFeed` 등).
+- **Outbound Ports**: 코어에서 외부 시스템(DB, 거래소)으로 나가는 통로 (`MarketDataSink`, `OrderExecutor` 등).
 
-### 3. 서비스 및 엔진 계층 (Service Layer)
-- **`src/market_data/`**: 거래소별 복잡한 API 프로토콜을 추상화합니다. WebSocket 재연결, Ping-Pong 처리, REST API 호출 등을 담당합니다.
-- **`src/order/`**: 주문 실행을 추상화합니다.
-    - `BacktestOrderExecutor`: 메모리 상에서 가상의 자산과 포지션을 계산하고 체결을 시뮬레이션합니다.
-    - `LiveOrderExecutor`: 바이낸스 선물 API 및 WebSocket(Order/User Stream)을 활용하여 실제 주문을 집행하고 체결 상태를 실시간으로 관리합니다.
+### 3. 애플리케이션 계층 (Application Layer) - Usecases
+- **책임**: 포트를 통해 들어온 요청을 처리하기 위해 도메인 모델을 조작하고 전체적인 흐름을 제어합니다.
+- **주요 컴포넌트**: `Collector`, `BacktestEngine`, `LiveOrderService`.
 
-### 4. 데이터 접근 계층 (Persistence Layer)
-- **`src/storage/questdb/`**: 고성능 시계열 데이터 저장을 담당합니다. `mpsc` 채널로 들어오는 이벤트를 버퍼링하여 QuestDB에 효율적으로 Flush합니다.
-- **`src/storage/postgres/config.rs`**: PostgreSQL을 사용하여 봇의 설정 정보(구독할 심볼 리스트 등)를 관리합니다.
-- **`src/storage/postgres/order.rs`**: PostgreSQL 기반 주문/체결 저장소를 담당합니다.
+### 4. 어댑터 계층 (Adapters Layer) - Infrastructure
+- **책임**: 포트 인터페이스를 실제로 구현하여 외부 시스템과 직접 통신합니다.
+- **주요 컴포넌트**: `BinanceApiAdapter`, `QuestDbWriter`, `PostgresRepository`.
 
-### 5. 도메인 모델 및 유틸리티 (Domain & Utils)
-- **`src/types.rs`**: 프로젝트 전체에서 사용되는 핵심 데이터 타입을 정의합니다.
-- **`src/config/`**: 구조화된 설정 값들을 정의하며, 런타임에 동적으로 변경될 수 있는 설정들을 포함합니다.
+### 5. 바이너리 계층 (Binary Layer) - Entry Points
+- **`src/bin/collector.rs`**: 데이터 수집기를 구동합니다.
+- **`src/bin/backtest.rs`**: 과거 데이터를 기반으로 시뮬레이션을 수행합니다.
+- **`src/bin/trader.rs`**: 실제 거래 전략을 실행하는 봇을 구동합니다.
 
 ---
 [메인으로 돌아가기](./README.md) | [03. 데이터 흐름 분석](./03_data_flow.md)
