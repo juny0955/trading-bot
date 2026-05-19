@@ -1,5 +1,6 @@
 use crate::domain::order::OrderError;
 use anyhow::anyhow;
+use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,6 +10,27 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time;
 use tracing::warn;
 
+#[derive(Debug, thiserror::Error)]
+pub enum BinanceApiError {
+    #[error("주문 거부: code={code} msg={msg}")]
+    Rejected { code: i32, msg: String },
+    #[error("timeout")]
+    Timeout,
+    #[error("connection: {0}")]
+    Connection(String),
+}
+
+impl From<BinanceApiError> for OrderError {
+    fn from(value: BinanceApiError) -> Self {
+        match value {
+            BinanceApiError::Rejected { .. } => OrderError::InsufficientMargin,
+            BinanceApiError::Timeout | BinanceApiError::Connection(_) => {
+                OrderError::NotFound("connection failed".into())
+            }
+        }
+    }
+}
+
 pub struct BinanceOrderApi {
     pub(crate) api_key: String,
     pub(crate) secret: String,
@@ -17,6 +39,7 @@ pub struct BinanceOrderApi {
     pub(crate) rest_base: String,
     pub(crate) ws_tx: Sender<String>,
     pub(crate) pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    client: Client,
 }
 
 impl BinanceOrderApi {
@@ -40,6 +63,11 @@ impl BinanceOrderApi {
             "https://fapi.binance.com".to_string()
         };
 
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+
         let executor = Arc::new(Self {
             api_key,
             secret,
@@ -48,6 +76,7 @@ impl BinanceOrderApi {
             rest_base,
             ws_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
+            client,
         });
         (executor, ws_rx)
     }
@@ -56,44 +85,52 @@ impl BinanceOrderApi {
         &self,
         id: String,
         request: Value,
-    ) -> Result<Value, OrderError> {
+    ) -> Result<Value, BinanceApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        self.pending.lock().await.insert(id.clone(), resp_tx);
 
-        if let Err(e) = self.ws_tx.send(request.to_string()).await {
+        let payload = serde_json::to_string(&request)
+            .map_err(|e| BinanceApiError::Connection(e.to_string()))?;
+
+        {
+            let mut pending = self.pending.lock().await;
+            pending.insert(id.clone(), resp_tx);
+        }
+
+        if let Err(e) = self.ws_tx.send(payload).await {
             self.pending.lock().await.remove(&id);
             warn!("Order WS 송신 실패 (id={id}): {e}");
-            return Err(OrderError::Connection(e.to_string()));
+            return Err(BinanceApiError::Connection(e.to_string()));
         }
 
         match time::timeout(Duration::from_secs(5), resp_rx).await {
-            Ok(Ok(val)) => {
+            Ok(Ok(mut val)) => {
                 if val["status"].as_u64() != Some(200) {
                     let code = val["error"]["code"].as_i64().unwrap_or(-1) as i32;
                     let msg = val["error"]["msg"]
                         .as_str()
                         .unwrap_or("unknown")
                         .to_string();
+                    
                     warn!("Order WS 거래소 거부 (id={id}, code={code}): {msg}");
-                    return Err(OrderError::ExchangeRejected { code, msg });
+                    return Err(BinanceApiError::Rejected { code, msg });
                 }
-                Ok(val["result"].clone())
+                Ok(val["result"].take())
             }
             Ok(Err(_)) => {
                 warn!("Order WS 채널 닫힘 (id={id})");
-                Err(OrderError::Connection("channel closed".into()))
+                Err(BinanceApiError::Connection("channel closed".into()))
             }
             Err(_) => {
                 self.pending.lock().await.remove(&id);
                 warn!("Order WS 응답 timeout (id={id})");
-                Err(OrderError::Connection("timeout".into()))
+                Err(BinanceApiError::Connection("timeout".into()))
             }
         }
     }
 
     pub(crate) async fn get_listen_key(&self) -> anyhow::Result<String> {
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
-        let val = reqwest::Client::new()
+        let val = self.client
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
@@ -109,7 +146,7 @@ impl BinanceOrderApi {
 
     pub(crate) async fn renew_listen_key(&self, listen_key: &str) -> anyhow::Result<()> {
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
-        reqwest::Client::new()
+        self.client
             .put(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .query(&[("listenKey", listen_key)])

@@ -1,8 +1,9 @@
 use crate::adapters::binance::api::BinanceOrderApi;
 use crate::adapters::binance::signing;
-use crate::domain::order::{Order, OrderError, OrderRequest, OrderStatus};
+use crate::domain::order::{
+    Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType, TimeInForce,
+};
 use crate::ports::order_executor::OrderExecutor;
-use crate::ports::order_repository::OrderRepository;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
@@ -11,7 +12,12 @@ use uuid::Uuid;
 
 pub struct BinanceOrderExecutor {
     api: Arc<BinanceOrderApi>,
-    repo: Arc<dyn OrderRepository>,
+}
+
+impl BinanceOrderExecutor {
+    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
+        Self { api }
+    }
 }
 
 #[async_trait]
@@ -43,18 +49,15 @@ impl OrderExecutor for BinanceOrderExecutor {
                 "signature": sig,
             }
         });
-        let result = self.api.send_and_wait(id, req).await?;
 
-        let mut filled = order.clone();
+        let result = self.api.send_and_wait(id, req).await?;
+        let mut filled = order;
         filled.exchange_order_id = result["orderId"].as_i64();
-        filled.status = OrderStatus::New;
-        self.repo.upsert_order(&filled).await?;
 
         Ok(filled)
     }
 
-    async fn cancel(&self, order_id: Uuid) -> Result<Order, OrderError> {
-        let order = self.get_order(order_id).await?;
+    async fn cancel(&self, order: &Order) -> Result<Order, OrderError> {
         let exchange_id = order
             .exchange_order_id
             .ok_or_else(|| OrderError::NotFound("exchange_order_id 없음".into()))?;
@@ -80,17 +83,16 @@ impl OrderExecutor for BinanceOrderExecutor {
         });
         let result = self.api.send_and_wait(id, req).await?;
 
-        let mut cancelled = order;
+        let mut cancelled = order.clone();
         if result["status"].as_str() == Some("CANCELED") {
             cancelled.status = OrderStatus::Cancelled;
             cancelled.updated_at = Utc::now();
-            self.repo.upsert_order(&cancelled).await?;
         }
+
         Ok(cancelled)
     }
 
-    async fn query(&self, order_id: Uuid) -> Result<Order, OrderError> {
-        let order = self.get_order(order_id).await?;
+    async fn query(&self, order: &Order) -> Result<Order, OrderError> {
         let exchange_id = order
             .exchange_order_id
             .ok_or_else(|| OrderError::NotFound("exchange_order_id 없음".into()))?;
@@ -116,7 +118,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         });
         let result = self.api.send_and_wait(id, req).await?;
 
-        let mut updated = order;
+        let mut updated = order.clone();
         updated.status = match result["status"].as_str() {
             Some("FILLED") => OrderStatus::Filled,
             Some("CANCELED") => OrderStatus::Cancelled,
@@ -126,7 +128,6 @@ impl OrderExecutor for BinanceOrderExecutor {
             _ => updated.status,
         };
         updated.updated_at = Utc::now();
-        self.repo.upsert_order(&updated).await?;
         Ok(updated)
     }
 
@@ -148,38 +149,45 @@ impl OrderExecutor for BinanceOrderExecutor {
         });
         let result = self.api.send_and_wait(id, req).await?;
 
-        // Binance에 살아있는 orderId 집합
-        let binance_ids: std::collections::HashSet<i64> = result
+        Ok(result
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .filter_map(|o| o["orderId"].as_i64())
-            .collect();
-
-        let mut db_orders = self.repo.find_open(symbol).await?;
-
-        for order in &mut db_orders {
-            if let Some(eid) = order.exchange_order_id
-                && !binance_ids.contains(&eid)
-            {
-                order.status = OrderStatus::Expired;
-                order.updated_at = Utc::now();
-                let _ = self.repo.upsert_order(order).await;
-            }
-        }
-
-        Ok(db_orders
-            .into_iter()
-            .filter(|o| matches!(o.status, OrderStatus::New | OrderStatus::PartiallyFilled))
+            .filter_map(|o| {
+                let exchange_id = o["orderId"].as_i64()?;
+                let side = match o["side"].as_str()? {
+                    "BUY" => OrderSide::Buy,
+                    "SELL" => OrderSide::Sell,
+                    _ => return None,
+                };
+                Some(Order {
+                    id: Uuid::nil(),
+                    client_order_id: o["clientOrderId"].as_str().unwrap_or("").to_string(),
+                    exchange_order_id: Some(exchange_id),
+                    symbol: symbol.into(),
+                    order_type: OrderType::Market,
+                    side,
+                    status: OrderStatus::New,
+                    qty: o["origQty"]
+                        .as_str()
+                        .unwrap_or("0")
+                        .parse()
+                        .unwrap_or_default(),
+                    price: None,
+                    stop_price: None,
+                    filled_qty: o["executedQty"]
+                        .as_str()
+                        .unwrap_or("0")
+                        .parse()
+                        .unwrap_or_default(),
+                    avg_fill_price: None,
+                    time_in_force: TimeInForce::Gtc,
+                    reduce_only: false,
+                    post_only: false,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+            })
             .collect())
-    }
-}
-
-impl BinanceOrderExecutor {
-    async fn get_order(&self, order_id: Uuid) -> Result<Order, OrderError> {
-        self.repo
-            .find_by_id(order_id)
-            .await?
-            .ok_or_else(|| OrderError::NotFound(order_id.to_string()))
     }
 }

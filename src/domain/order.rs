@@ -90,12 +90,8 @@ pub enum OrderError {
     NotFound(String),
     #[error("Insufficient Margin")]
     InsufficientMargin,
-    #[error("Exchange Rejected: {code} {msg}")]
-    ExchangeRejected { code: i32, msg: String },
-    #[error("Storage Error: {0}")]
-    Storage(String),
-    #[error("Connection Error: {0}")]
-    Connection(String),
+    #[error("Invalid Request: {0}")]
+    InvalidRequest(String),
 }
 
 impl Order {

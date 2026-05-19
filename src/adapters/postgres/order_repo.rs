@@ -1,7 +1,5 @@
-use crate::domain::order::{
-    Fill, Order, OrderError, OrderSide, OrderStatus, OrderType, TimeInForce,
-};
-use crate::ports::order_repository::OrderRepository;
+use crate::domain::order::{Fill, Order, OrderSide, OrderStatus, OrderType, TimeInForce};
+use crate::ports::order_repository::{OrderRepository, RepositoryError};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -90,23 +88,26 @@ pub struct PgOrderRepository {
 
 #[async_trait]
 impl OrderRepository for PgOrderRepository {
-    async fn upsert_order(&self, order: &Order) -> Result<(), OrderError> {
+    async fn upsert_order(&self, order: &Order) -> Result<(), RepositoryError> {
         Self::upsert_order(self, order).await
     }
 
-    async fn record_fill(&self, fill: &Fill) -> Result<(), OrderError> {
+    async fn record_fill(&self, fill: &Fill) -> Result<(), RepositoryError> {
         Self::record_fill(self, fill).await
     }
 
-    async fn find_open(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    async fn find_open(&self, symbol: &str) -> Result<Vec<Order>, RepositoryError> {
         Self::find_open(self, symbol).await
     }
 
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<Order>, OrderError> {
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<Order>, RepositoryError> {
         Self::find_by_id(self, id).await
     }
 
-    async fn find_by_exchange_id(&self, exchange_id: i64) -> Result<Option<Order>, OrderError> {
+    async fn find_by_exchange_id(
+        &self,
+        exchange_id: i64,
+    ) -> Result<Option<Order>, RepositoryError> {
         Self::find_by_exchange_id(self, exchange_id).await
     }
 }
@@ -116,7 +117,7 @@ impl PgOrderRepository {
         Self { pool }
     }
 
-    pub async fn upsert_order(&self, order: &Order) -> Result<(), OrderError> {
+    pub async fn upsert_order(&self, order: &Order) -> Result<(), RepositoryError> {
         sqlx::query(
             r#"
             INSERT INTO orders (
@@ -156,7 +157,7 @@ impl PgOrderRepository {
         Ok(())
     }
 
-    pub async fn record_fill(&self, fill: &Fill) -> Result<(), OrderError> {
+    pub async fn record_fill(&self, fill: &Fill) -> Result<(), RepositoryError> {
         sqlx::query(
             r#"
             INSERT INTO fills (
@@ -178,7 +179,7 @@ impl PgOrderRepository {
         Ok(())
     }
 
-    pub async fn find_open(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    pub async fn find_open(&self, symbol: &str) -> Result<Vec<Order>, RepositoryError> {
         Ok(sqlx::query_as::<_, DbOrder>(
             r#"SELECT * FROM orders WHERE symbol = $1 AND status IN ('new', 'partially_filled')"#,
         )
@@ -190,7 +191,7 @@ impl PgOrderRepository {
         .collect())
     }
 
-    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Order>, OrderError> {
+    pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Order>, RepositoryError> {
         Ok(
             sqlx::query_as::<_, DbOrder>(r#"SELECT * FROM orders WHERE id = $1"#)
                 .bind(id)
@@ -200,7 +201,10 @@ impl PgOrderRepository {
         )
     }
 
-    pub async fn find_by_exchange_id(&self, exchange_id: i64) -> Result<Option<Order>, OrderError> {
+    pub async fn find_by_exchange_id(
+        &self,
+        exchange_id: i64,
+    ) -> Result<Option<Order>, RepositoryError> {
         Ok(
             sqlx::query_as::<_, DbOrder>(r#"SELECT * FROM orders WHERE exchange_order_id = $1"#)
                 .bind(exchange_id)

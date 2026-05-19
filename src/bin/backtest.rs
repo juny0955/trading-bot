@@ -7,8 +7,9 @@ use tracing::info;
 use trading_bot::adapters::questdb_rest::data_source::QuestDbRestDataSource;
 use trading_bot::application::backtest::engine::{self, BacktestConfig};
 use trading_bot::application::backtest::report;
-use trading_bot::domain::strategies;
+use trading_bot::domain::strategies::create_strategy;
 use trading_bot::init;
+use trading_bot::ports::market_data_source::{BarInterval, DepthSampleInterval};
 
 #[derive(Parser, Debug, serde::Serialize)]
 #[command(name = "backtest")]
@@ -58,14 +59,23 @@ async fn main() -> Result<()> {
 
     let params: serde_json::Value =
         serde_json::from_str(&args.params).context("--params JSON 파싱 실패")?;
-    let mut strategy = strategies::create_strategy(&args.strategy, &params)?;
+    let mut strategy = create_strategy(&args.strategy, &params)?;
+
+    let bar_interval = args
+        .bar_interval
+        .parse::<BarInterval>()
+        .map_err(|e| anyhow!("--bar-interval 파싱 실패: {e}"))?;
+    let depth_every = args
+        .depth_every
+        .parse::<DepthSampleInterval>()
+        .map_err(|e| anyhow!("--depth-every 파싱 실패: {e}"))?;
 
     let cfg = BacktestConfig {
         symbol: args.symbol.clone(),
         from_ns,
         to_ns,
-        bar_interval: args.bar_interval.clone(),
-        depth_every: args.depth_every.clone(),
+        bar_interval,
+        depth_every,
         initial_equity: args.initial_equity,
         fee_bps: args.fee_bps,
         depth_freshness_sec: args.depth_freshness_sec,

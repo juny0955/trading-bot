@@ -1,8 +1,10 @@
 use crate::application::backtest::backtest_executor::{BacktestOrderExecutor, PortfolioSnapshot};
 use crate::domain::backtest::{Bar, DepthSnapshot, Event};
 use crate::domain::order::{OrderRequest, OrderSide, OrderType};
-use crate::domain::strategies::{Context, Strategy};
-use crate::ports::market_data_source::{BarQuery, DepthQuery, MarketDataSource};
+use crate::domain::strategies::{Context, Strategy, StrategyCommand};
+use crate::ports::market_data_source::{
+    BarInterval, BarQuery, DepthQuery, DepthSampleInterval, MarketDataSource,
+};
 use crate::ports::order_executor::OrderExecutor;
 use anyhow::Result;
 use rust_decimal::Decimal;
@@ -13,8 +15,8 @@ pub struct BacktestConfig {
     pub symbol: String,
     pub from_ns: i64,
     pub to_ns: i64,
-    pub bar_interval: String,
-    pub depth_every: String,
+    pub bar_interval: BarInterval,
+    pub depth_every: DepthSampleInterval,
     pub initial_equity: Decimal,
     pub fee_bps: Decimal,
     pub depth_freshness_sec: i64,
@@ -33,23 +35,42 @@ pub struct BacktestResult {
     pub equity_curve: Vec<EquityPoint>,
 }
 
+pub struct BacktestEngine<E: OrderExecutor> {
+    executor: E,
+}
+
+impl<E: OrderExecutor> BacktestEngine<E> {
+    async fn handle(&self, commands: Vec<StrategyCommand>) -> Result<()> {
+        for cmd in commands {
+            match cmd {
+                StrategyCommand::SubmitOrder(req) => {
+                    self.executor.submit(req).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub async fn run(
     src: &dyn MarketDataSource,
     cfg: BacktestConfig,
     strategy: &mut dyn Strategy,
 ) -> Result<BacktestResult> {
+    let symbol_ref = &cfg.symbol;
     let (bars, depths) = tokio::join!(
         src.fetch_bars(BarQuery {
-            symbol: cfg.symbol.clone(),
+            symbol: symbol_ref.clone(),
             from_ns: cfg.from_ns,
             to_ns: cfg.to_ns,
-            interval: cfg.bar_interval.clone(),
+            interval: cfg.bar_interval,
         }),
         src.fetch_depth_snapshots(DepthQuery {
-            symbol: cfg.symbol.clone(),
+            symbol: symbol_ref.clone(),
             from_ns: cfg.from_ns,
             to_ns: cfg.to_ns,
-            every: cfg.depth_every.clone(),
+            every: cfg.depth_every,
         }),
     );
     let bars = bars?;
@@ -57,28 +78,23 @@ pub async fn run(
     info!(bars = bars.len(), depths = depths.len(), "fetched");
 
     let events = merge_events(bars, depths);
+    let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
+
     if events.is_empty() {
-        let executor = BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps);
         return Ok(BacktestResult {
             portfolio: executor.snapshot(),
             equity_curve: Vec::new(),
         });
     }
 
-    let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
-
     let mut equity_curve = Vec::with_capacity(events.len());
     let mut last_depth: Option<&DepthSnapshot> = None;
     let depth_fresh_ns = cfg.depth_freshness_sec.saturating_mul(1_000_000_000);
 
     {
-        let ctx = Context {
-            now_ns: events[0].ts_ns(),
-            equity: executor.equity(),
-            position: executor.position(),
-            executor: executor.clone() as Arc<dyn OrderExecutor>,
-        };
-        strategy.on_start(&ctx).await;
+        let ctx = make_ctx(&executor, events[0].ts_ns());
+        let cmds = strategy.on_start(&ctx);
+        dispatch(&executor, cmds).await;
     }
 
     for ev in &events {
@@ -96,19 +112,15 @@ pub async fn run(
             mark_price: mark,
         });
 
-        let ctx = Context {
-            now_ns: ts,
-            equity: executor.equity(),
-            position: executor.position(),
-            executor: executor.clone() as Arc<dyn OrderExecutor>,
-        };
-        match ev {
-            Event::Bar(b) => strategy.on_bar(b, &ctx).await,
+        let ctx = make_ctx(&executor, ts);
+        let cmds = match ev {
+            Event::Bar(b) => strategy.on_bar(b, &ctx),
             Event::Depth(d) => {
-                strategy.on_depth(d, &ctx).await;
                 last_depth = Some(d);
+                strategy.on_depth(d, &ctx)
             }
-        }
+        };
+        dispatch(&executor, cmds).await;
     }
 
     // 종료 시 잔여 포지션 시장가 청산 (마지막 이벤트 가격으로)
@@ -123,7 +135,7 @@ pub async fn run(
         let qty = executor.position().qty;
         let _ = executor
             .submit(OrderRequest {
-                symbol: cfg.symbol.clone(),
+                symbol: symbol_ref.clone(),
                 order_type: OrderType::Market,
                 side: close_side,
                 qty,
@@ -140,19 +152,33 @@ pub async fn run(
 
     {
         let last = events.last().unwrap().ts_ns();
-        let ctx = Context {
-            now_ns: last,
-            equity: executor.equity(),
-            position: executor.position(),
-            executor: executor.clone() as Arc<dyn OrderExecutor>,
-        };
-        strategy.on_finish(&ctx).await;
+        let ctx = make_ctx(&executor, last);
+        let cmds = strategy.on_finish(&ctx);
+        dispatch(&executor, cmds).await;
     }
 
     Ok(BacktestResult {
         portfolio: executor.snapshot(),
         equity_curve,
     })
+}
+
+fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Context {
+    Context {
+        now_ns: ts_ns,
+        equity: executor.equity(),
+        position: executor.position(),
+    }
+}
+
+async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyCommand>) {
+    for cmd in cmds {
+        match cmd {
+            StrategyCommand::SubmitOrder(req) => {
+                let _ = executor.submit(req).await;
+            }
+        }
+    }
 }
 
 fn pick_price(
@@ -184,15 +210,27 @@ fn event_mark_price(ev: &Event) -> Decimal {
 
 fn merge_events(bars: Vec<Bar>, depths: Vec<DepthSnapshot>) -> Vec<Event> {
     let mut out = Vec::with_capacity(bars.len() + depths.len());
-    let mut bars = bars.into_iter().peekable();
-    let mut depths = depths.into_iter().peekable();
-    loop {
-        match (bars.peek().map(|b| b.ts_ns), depths.peek().map(|d| d.ts_ns)) {
-            (Some(bt), Some(dt)) if bt <= dt => out.push(Event::Bar(bars.next().unwrap())),
-            (Some(_), Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
-            (Some(_), None) => out.push(Event::Bar(bars.next().unwrap())),
-            (None, Some(_)) => out.push(Event::Depth(depths.next().unwrap())),
-            (None, None) => break,
+    let mut bars_it = bars.into_iter();
+    let mut depths_it = depths.into_iter();
+
+    let mut next_bar = bars_it.next();
+    let mut next_depth = depths_it.next();
+
+    while next_bar.is_some() || next_depth.is_some() {
+        match (&next_bar, &next_depth) {
+            (Some(b), Some(d)) if b.ts_ns <= d.ts_ns => {
+                out.push(Event::Bar(next_bar.take().unwrap()));
+                next_bar = bars_it.next();
+            }
+            (None, Some(_)) | (Some(_), Some(_)) => {
+                out.push(Event::Depth(next_depth.take().unwrap()));
+                next_depth = depths_it.next();
+            }
+            (Some(_), None) => {
+                out.push(Event::Bar(next_bar.take().unwrap()));
+                next_bar = bars_it.next();
+            }
+            (None, None) => unreachable!(),
         }
     }
     out

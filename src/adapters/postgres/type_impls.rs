@@ -1,13 +1,14 @@
-use crate::domain::order::{OrderError, OrderSide, OrderStatus, OrderType, TimeInForce};
+use crate::domain::order::{OrderSide, OrderStatus, OrderType, TimeInForce};
+use crate::ports::order_repository::RepositoryError;
 use sqlx::Postgres;
 use sqlx::encode::IsNull;
 use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo, PgValueRef};
 
 type BoxDynError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-impl From<sqlx::Error> for OrderError {
+impl From<sqlx::Error> for RepositoryError {
     fn from(e: sqlx::Error) -> Self {
-        OrderError::Storage(e.to_string())
+        RepositoryError::Storage(e.to_string())
     }
 }
 

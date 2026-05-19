@@ -41,7 +41,7 @@ impl MarketDataSource for QuestDbRestDataSource {
             sym = q.symbol,
             from = from_iso,
             to = to_iso,
-            interval = q.interval,
+            interval = q.interval.to_questdb_sample_by(),
         );
 
         let resp = self.exec(&sql).await?;
@@ -78,7 +78,7 @@ impl MarketDataSource for QuestDbRestDataSource {
             sym = q.symbol,
             from = from_iso,
             to = to_iso,
-            every = q.every,
+            every = q.every.to_questdb_sample_by(),
         );
 
         let resp = self.exec(&sql).await?;

@@ -5,9 +5,10 @@ use rust_decimal_macros::dec;
 use trading_bot::application::backtest::engine::{self, BacktestConfig};
 use trading_bot::domain::backtest::{Bar, DepthSnapshot};
 use trading_bot::domain::order::{OrderRequest, OrderSide, OrderType};
-use trading_bot::domain::strategies::{Context, Strategy};
-use trading_bot::ports::market_data_source::{BarQuery, DepthQuery, MarketDataSource};
-use trading_bot::ports::order_executor::OrderExecutor;
+use trading_bot::domain::strategies::{Context, Strategy, StrategyCommand};
+use trading_bot::ports::market_data_source::{
+    BarInterval, BarQuery, DepthQuery, DepthSampleInterval, MarketDataSource,
+};
 
 struct LinearSource {
     bars: Vec<Bar>,
@@ -28,22 +29,19 @@ struct BuyAndHold {
     qty: Decimal,
 }
 
-#[async_trait]
 impl Strategy for BuyAndHold {
-    async fn on_bar(&mut self, bar: &Bar, ctx: &Context) {
+    fn on_bar(&mut self, bar: &Bar, _ctx: &Context) -> Vec<StrategyCommand> {
         if !self.fired {
-            let _ = ctx
-                .executor
-                .submit(OrderRequest {
-                    symbol: bar.symbol.clone(),
-                    order_type: OrderType::Market,
-                    side: OrderSide::Buy,
-                    qty: self.qty,
-                    ..Default::default()
-                })
-                .await;
             self.fired = true;
+            return vec![StrategyCommand::SubmitOrder(OrderRequest {
+                symbol: bar.symbol.clone(),
+                order_type: OrderType::Market,
+                side: OrderSide::Buy,
+                qty: self.qty,
+                ..Default::default()
+            })];
         }
+        vec![]
     }
 }
 
@@ -75,8 +73,8 @@ async fn buy_and_hold_golden_pnl() {
         symbol: "X".into(),
         from_ns: 0,
         to_ns: 1_000_000_000_000,
-        bar_interval: "1s".into(),
-        depth_every: "1s".into(),
+        bar_interval: BarInterval::Sec(1),
+        depth_every: DepthSampleInterval::Sec(1),
         initial_equity: dec!(10000),
         fee_bps: dec!(4),
         depth_freshness_sec: 0,

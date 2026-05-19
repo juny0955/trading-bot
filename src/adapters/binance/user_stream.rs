@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::adapters::binance::api::BinanceOrderApi;
+use crate::adapters::binance::dto_account::BinanceOrderTradeUpdate;
+use crate::application::order_execution_event::OrderExecutionEvent;
 use anyhow::anyhow;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
@@ -20,7 +22,11 @@ impl BinanceUserStreamHandler {
         Self { api }
     }
 
-    pub(crate) async fn run_user_stream(&self, tx: Sender<Value>, token: CancellationToken) {
+    pub(crate) async fn run_user_stream(
+        &self,
+        tx: Sender<OrderExecutionEvent>,
+        token: CancellationToken,
+    ) {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
@@ -41,7 +47,7 @@ impl BinanceUserStreamHandler {
 
     async fn user_stream_session(
         &self,
-        tx: &Sender<Value>,
+        tx: &Sender<OrderExecutionEvent>,
         token: CancellationToken,
     ) -> anyhow::Result<()> {
         let listen_key = self.api.get_listen_key().await?;
@@ -58,36 +64,39 @@ impl BinanceUserStreamHandler {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
-                  let _ = write.send(Message::Close(None)).await;
-                  info!("User WS Close Frame 전송 후 종료");
-                  return Ok(());
-                  }
-                  _ = renew_interval.tick() => {
-                      if let Err(e) = self.api.renew_listen_key(&listen_key).await {
+                    let _ = write.send(Message::Close(None)).await;
+                    info!("User WS Close Frame 전송 후 종료");
+                    return Ok(());
+                }
+                _ = renew_interval.tick() => {
+                    if let Err(e) = self.api.renew_listen_key(&listen_key).await {
                           warn!("User WS listenKey 갱신 실패: {e}");
                           return Err(anyhow!("listenKey 갱신 실패"));
-                      }
-                      info!("User WS listenKey 갱신됨");
-                  }
-                  msg = time::timeout(Duration::from_secs(60), read.next()) => {
-                      match msg {
-                          Ok(Some(Ok(Message::Text(text)))) => {
-                              if let Ok(val) = serde_json::from_str::<Value>(&text)
-                              && val["e"].as_str() == Some("ORDER_TRADE_UPDATE") {
-                                  tx.send(val).await.ok();
-                              }
-                          }
-                          Ok(Some(Ok(Message::Ping(payload)))) => {
-                              write.send(Message::Pong(payload)).await?;
-                          }
-                          Ok(Some(Ok(Message::Close(_)))) => {
-                              return Err(anyhow!("User WS 서버 측 Close"));
-                          }
-                          Ok(None) => return Err(anyhow!("User WS 스트림 종료")),
-                          Err(_) => return Err(anyhow!("User WS 타임아웃 60s")),
-                          _ => {}
-                      }
-                  }
+                    }
+                    info!("User WS listenKey 갱신됨");
+                }
+                msg = time::timeout(Duration::from_secs(60), read.next()) => {
+                    match msg {
+                        Ok(Some(Ok(Message::Text(text)))) => {
+                            if let Ok(val) = serde_json::from_str::<Value>(&text) &&
+                            let Ok(dto) = BinanceOrderTradeUpdate::from_value(&val) {
+                                let event = dto.into_execution_event();
+                                let _ = tx.send(event).await.ok();
+                            } else {
+                                warn!("ORDER_TRADE_UPDATE 파싱 실패");
+                            }
+                        }
+                        Ok(Some(Ok(Message::Ping(payload)))) => {
+                            write.send(Message::Pong(payload)).await?;
+                        }
+                        Ok(Some(Ok(Message::Close(_)))) => {
+                            return Err(anyhow!("User WS 서버 측 Close"));
+                        }
+                        Ok(None) => return Err(anyhow!("User WS 스트림 종료")),
+                        Err(_) => return Err(anyhow!("User WS 타임아웃 60s")),
+                        _ => {}
+                    }
+                }
             }
         }
     }
