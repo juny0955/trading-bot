@@ -1,4 +1,5 @@
 use crate::application::order_execution_event::OrderExecutionEvent;
+use crate::domain::order::Fill;
 use crate::ports::fill_sink::FillSink;
 use crate::ports::order_repository::OrderRepository;
 use chrono::Utc;
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
-use crate::domain::order::Fill;
 
 pub struct AccountEventHandler {
     repo: Arc<dyn OrderRepository>,

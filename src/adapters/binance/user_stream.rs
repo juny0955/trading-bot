@@ -18,15 +18,11 @@ pub struct BinanceUserStreamHandler {
 }
 
 impl BinanceUserStreamHandler {
-    pub(crate) fn new(api: Arc<BinanceOrderApi>) -> Self {
+    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
         Self { api }
     }
 
-    pub(crate) async fn run_user_stream(
-        &self,
-        tx: Sender<OrderExecutionEvent>,
-        token: CancellationToken,
-    ) {
+    pub async fn run_user_stream(&self, tx: Sender<OrderExecutionEvent>, token: CancellationToken) {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {

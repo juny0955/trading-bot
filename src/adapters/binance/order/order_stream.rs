@@ -16,6 +16,10 @@ pub struct OrderWsLoop {
 }
 
 impl OrderWsLoop {
+    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
+        Self { api }
+    }
+
     pub async fn run_order_stream(&self, mut ws_rx: Receiver<String>, token: CancellationToken) {
         loop {
             tokio::select! {

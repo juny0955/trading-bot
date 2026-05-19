@@ -110,7 +110,7 @@ impl BinanceOrderApi {
                         .as_str()
                         .unwrap_or("unknown")
                         .to_string();
-                    
+
                     warn!("Order WS 거래소 거부 (id={id}, code={code}): {msg}");
                     return Err(BinanceApiError::Rejected { code, msg });
                 }
@@ -130,7 +130,8 @@ impl BinanceOrderApi {
 
     pub(crate) async fn get_listen_key(&self) -> anyhow::Result<String> {
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
-        let val = self.client
+        let val = self
+            .client
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()

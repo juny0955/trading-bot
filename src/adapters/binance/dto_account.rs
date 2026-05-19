@@ -1,9 +1,9 @@
+use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
+use crate::domain::order::{OrderSide, OrderStatus};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use thiserror::Error;
-use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
-use crate::domain::order::{OrderSide, OrderStatus};
 
 #[derive(Debug, Error)]
 pub enum DtoMappingError {
