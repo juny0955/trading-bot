@@ -5,9 +5,9 @@ use rust_decimal::Decimal;
 use std::path::PathBuf;
 use tracing::info;
 use trading_bot::adapters::questdb_rest::data_source::QuestDbRestDataSource;
-use trading_bot::adapters::strategies;
 use trading_bot::application::backtest::engine::{self, BacktestConfig};
 use trading_bot::application::backtest::report;
+use trading_bot::domain::strategies;
 use trading_bot::init;
 
 #[derive(Parser, Debug, serde::Serialize)]

@@ -1,7 +1,7 @@
 use crate::application::backtest::backtest_executor::{BacktestOrderExecutor, PortfolioSnapshot};
-use crate::application::backtest::strategy::{Context, Strategy};
 use crate::domain::backtest::{Bar, DepthSnapshot, Event};
 use crate::domain::order::{OrderRequest, OrderSide, OrderType};
+use crate::domain::strategies::{Context, Strategy};
 use crate::ports::market_data_source::{BarQuery, DepthQuery, MarketDataSource};
 use crate::ports::order_executor::OrderExecutor;
 use anyhow::Result;
@@ -76,7 +76,7 @@ pub async fn run(
             now_ns: events[0].ts_ns(),
             equity: executor.equity(),
             position: executor.position(),
-            executor: executor.clone(),
+            executor: executor.clone() as Arc<dyn OrderExecutor>,
         };
         strategy.on_start(&ctx).await;
     }
@@ -100,7 +100,7 @@ pub async fn run(
             now_ns: ts,
             equity: executor.equity(),
             position: executor.position(),
-            executor: executor.clone(),
+            executor: executor.clone() as Arc<dyn OrderExecutor>,
         };
         match ev {
             Event::Bar(b) => strategy.on_bar(b, &ctx).await,
@@ -144,7 +144,7 @@ pub async fn run(
             now_ns: last,
             equity: executor.equity(),
             position: executor.position(),
-            executor: executor.clone(),
+            executor: executor.clone() as Arc<dyn OrderExecutor>,
         };
         strategy.on_finish(&ctx).await;
     }

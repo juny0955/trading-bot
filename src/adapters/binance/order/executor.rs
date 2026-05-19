@@ -1,4 +1,4 @@
-use crate::adapters::binance::order::api::BinanceOrderApi;
+use crate::adapters::binance::api::BinanceOrderApi;
 use crate::adapters::binance::signing;
 use crate::domain::order::{Order, OrderError, OrderRequest, OrderStatus};
 use crate::ports::order_executor::OrderExecutor;
@@ -48,10 +48,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         let mut filled = order.clone();
         filled.exchange_order_id = result["orderId"].as_i64();
         filled.status = OrderStatus::New;
-        self.repo
-            .upsert_order(&filled)
-            .await
-            .map_err(OrderError::Storage)?;
+        self.repo.upsert_order(&filled).await?;
 
         Ok(filled)
     }
@@ -87,10 +84,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         if result["status"].as_str() == Some("CANCELED") {
             cancelled.status = OrderStatus::Cancelled;
             cancelled.updated_at = Utc::now();
-            self.repo
-                .upsert_order(&cancelled)
-                .await
-                .map_err(OrderError::Storage)?;
+            self.repo.upsert_order(&cancelled).await?;
         }
         Ok(cancelled)
     }
@@ -132,10 +126,7 @@ impl OrderExecutor for BinanceOrderExecutor {
             _ => updated.status,
         };
         updated.updated_at = Utc::now();
-        self.repo
-            .upsert_order(&updated)
-            .await
-            .map_err(OrderError::Storage)?;
+        self.repo.upsert_order(&updated).await?;
         Ok(updated)
     }
 
@@ -165,11 +156,7 @@ impl OrderExecutor for BinanceOrderExecutor {
             .filter_map(|o| o["orderId"].as_i64())
             .collect();
 
-        let mut db_orders = self
-            .repo
-            .find_open(symbol)
-            .await
-            .map_err(OrderError::Storage)?;
+        let mut db_orders = self.repo.find_open(symbol).await?;
 
         for order in &mut db_orders {
             if let Some(eid) = order.exchange_order_id
@@ -192,8 +179,7 @@ impl BinanceOrderExecutor {
     async fn get_order(&self, order_id: Uuid) -> Result<Order, OrderError> {
         self.repo
             .find_by_id(order_id)
-            .await
-            .map_err(OrderError::Storage)?
+            .await?
             .ok_or_else(|| OrderError::NotFound(order_id.to_string()))
     }
 }

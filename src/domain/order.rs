@@ -3,8 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum OrderType {
     #[default]
     Market,
@@ -13,16 +12,14 @@ pub enum OrderType {
     StopLimit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum OrderSide {
     #[default]
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
     New,
     PartiallyFilled,
@@ -32,8 +29,7 @@ pub enum OrderStatus {
     Expired,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, sqlx::Type)]
-#[sqlx(type_name = "VARCHAR", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TimeInForce {
     #[default]
     Gtc,
@@ -41,7 +37,7 @@ pub enum TimeInForce {
     Fok,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: Uuid,
     pub client_order_id: String,
@@ -62,7 +58,7 @@ pub struct Order {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill {
     pub order_id: Uuid,
     pub symbol: String,
@@ -97,7 +93,7 @@ pub enum OrderError {
     #[error("Exchange Rejected: {code} {msg}")]
     ExchangeRejected { code: i32, msg: String },
     #[error("Storage Error: {0}")]
-    Storage(#[from] sqlx::Error),
+    Storage(String),
     #[error("Connection Error: {0}")]
     Connection(String),
 }

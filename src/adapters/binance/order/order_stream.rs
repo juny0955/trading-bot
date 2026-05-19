@@ -1,4 +1,4 @@
-use crate::adapters::binance::order::api::BinanceOrderApi;
+use crate::adapters::binance::api::BinanceOrderApi;
 use anyhow::{Result, anyhow};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;

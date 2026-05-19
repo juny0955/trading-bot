@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use trading_bot::application::backtest::engine::{self, BacktestConfig};
-use trading_bot::application::backtest::strategy::{Context, Strategy};
 use trading_bot::domain::backtest::{Bar, DepthSnapshot};
 use trading_bot::domain::order::{OrderRequest, OrderSide, OrderType};
+use trading_bot::domain::strategies::{Context, Strategy};
 use trading_bot::ports::market_data_source::{BarQuery, DepthQuery, MarketDataSource};
 use trading_bot::ports::order_executor::OrderExecutor;
 
