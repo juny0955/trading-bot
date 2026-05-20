@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time;
-use tracing::warn;
+use tracing::{error, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BinanceApiError {
@@ -88,7 +88,7 @@ impl BinanceOrderApi {
 
         if let Err(e) = self.ws_tx.send(payload).await {
             self.pending.lock().await.remove(&id);
-            warn!("Order WS 송신 실패 (id={id}): {e}");
+            error!(id = %id, error = %e, "Order WS 송신 실패");
             return Err(BinanceApiError::Connection(e.to_string()));
         }
 
@@ -101,18 +101,18 @@ impl BinanceOrderApi {
                         .unwrap_or("unknown")
                         .to_string();
 
-                    warn!("Order WS 거래소 거부 (id={id}, code={code}): {msg}");
+                    warn!(id = %id, code = %code, msg = %msg, "Order WS 거래소 거부");
                     return Err(BinanceApiError::Rejected { code, msg });
                 }
                 Ok(val["result"].take())
             }
             Ok(Err(_)) => {
-                warn!("Order WS 채널 닫힘 (id={id})");
+                warn!(id = %id, "Order WS 채널 닫힘");
                 Err(BinanceApiError::Connection("channel closed".into()))
             }
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                warn!("Order WS 응답 timeout (id={id})");
+                warn!(id = %id, "Order WS 응답 timeout");
                 Err(BinanceApiError::Connection("timeout".into()))
             }
         }

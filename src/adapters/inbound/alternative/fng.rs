@@ -34,7 +34,7 @@ impl FngFeed for AlternativeFngFeed {
 
         while let Some(fng) = fng_rx.recv().await {
             if let Err(e) = market_tx.send(fng.into()).await {
-                warn!("QuestDB Tx 채널 닫힘: {e}");
+                warn!(error = %e, "QuestDB Tx 채널 닫힘");
                 break;
             }
         }
@@ -70,7 +70,7 @@ async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Opt
     let resp = match reqwest::get(URL).await {
         Ok(r) => r,
         Err(e) => {
-            error!("FNG 요청 실패: {e}");
+            error!(error = %e, "FNG 요청 실패");
             return Some(Duration::from_secs(cfg.retry_interval_sec));
         }
     };
@@ -78,7 +78,7 @@ async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Opt
     let fng = match resp.json::<FngResponse>().await {
         Ok(f) => f,
         Err(e) => {
-            error!("FNG 파싱 실패: {e}");
+            error!(error = %e, "FNG 파싱 실패");
             return Some(Duration::from_secs(cfg.retry_interval_sec));
         }
     };
@@ -94,7 +94,7 @@ async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Opt
         .unwrap_or(cfg.fallback_interval_sec);
 
     if let Err(e) = tx.send(data).await {
-        warn!("FNG 채널 닫힘: {e}");
+        warn!(error = %e, "FNG 채널 닫힘");
         return None;
     }
 

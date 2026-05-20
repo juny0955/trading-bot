@@ -43,6 +43,7 @@ impl TradingUseCase for Trader {
 
         let ctx = make_ctx(&position, now_ns()).await;
         let cmds = strategy.on_start(&ctx);
+        info!(cmds = cmds.len(), "전략 on_start");
         dispatch(&self.order_svc, &position, cmds).await;
 
         loop {
@@ -64,6 +65,7 @@ impl TradingUseCase for Trader {
 
         let ctx = make_ctx(&position, now_ns()).await;
         let cmds = strategy.on_finish(&ctx);
+        info!(cmds = cmds.len(), "전략 on_finish");
         dispatch(&self.order_svc, &position, cmds).await;
 
         Ok(())
@@ -101,7 +103,7 @@ async fn dispatch(
                         info!(id = %order.id, ?side, %qty, "주문 제출");
                         update_position(position, side, qty, reduce_only).await;
                     }
-                    Err(e) => error!("주문 실패: {e}"),
+                    Err(e) => error!(error = %e, ?side, %qty, "주문 실패"),
                 }
             }
         }
@@ -120,6 +122,7 @@ async fn update_position(
         if p.qty == Decimal::ZERO {
             *p = Position::default();
         }
+        info!(side = ?p.side, qty = %p.qty, "포지션 갱신 (reduce)");
     } else {
         match p.side {
             Some(cur) if cur == side => { p.qty += qty; }
@@ -133,6 +136,7 @@ async fn update_position(
                 p.qty = qty;
             }
         }
+        info!(side = ?p.side, qty = %p.qty, "포지션 갱신 (open)");
         // entry_price: 실제 체결가는 AccountEventHandler에서 확정
     }
 }

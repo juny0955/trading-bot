@@ -69,7 +69,7 @@ impl LiveMarketFeed for BinanceLiveFeed {
         handles.push(tokio::spawn(async move {
             while let Some(stream) = stream_rx.recv().await {
                 if let Err(e) = market_tx.send(stream.into()).await {
-                    warn!("QuestDB Tx 채널 닫힘: {e}");
+                    warn!(error = %e, "QuestDB Tx 채널 닫힘");
                     return;
                 }
             }
@@ -141,7 +141,7 @@ async fn stream(
         tokio::select! {
             _ = token.cancelled() => {
                 let _ = write.send(Message::Close(None)).await;
-                info!("Binance {stream_type} WS Close Frame 전송 후 종료");
+                info!(stream_type = %stream_type, "Binance WS Close Frame 전송 후 종료");
                 return Ok(());
             }
             msg = timeout(read_timeout, read.next()) => {
@@ -154,13 +154,13 @@ async fn stream(
                     Ok(Message::Text(text)) => match serde_json::from_str::<StreamEnvelope>(&text) {
                         Ok(envelope) => {
                             if let Err(e) = tx.send(envelope.data).await {
-                                warn!("Binance {stream_type} Stream 채널 닫힘: {e}");
+                                warn!(stream_type = %stream_type, error = %e, "Binance Stream 채널 닫힘");
                                 return Ok(());
                             }
                         }
                         Err(e) => {
                             let preview: String = text.chars().take(200).collect();
-                            warn!("Binance {stream_type} Payload 파싱 실패: {e}, raw={preview}");
+                            warn!(stream_type = %stream_type, error = %e, raw_preview = %preview, "Binance Payload 파싱 실패");
                         }
                     },
                     Ok(Message::Ping(payload)) => {

@@ -55,7 +55,7 @@ pub async fn run(
     let mut sender = match Sender::from_conf(url) {
         Ok(s) => s,
         Err(e) => {
-            error!("QuestDB 초기 연결 실패: {e}");
+            error!(error = %e, "QuestDB 초기 연결 실패");
             return;
         }
     };
@@ -87,7 +87,7 @@ pub async fn run(
                 match result {
                     Ok(()) => rows += 1,
                     Err(e) => {
-                        warn!("Market data append 실패 (이전 누적 buffer flush 시도): {e}");
+                        warn!(error = %e, "Market data append 실패 — 이전 누적 buffer flush 시도");
                         flush_if_any(&mut sender, &mut buf, &mut rows, url, "append_error");
                     }
                 }
@@ -116,7 +116,7 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
     match sender.flush(buf) {
         Ok(()) => *rows = 0,
         Err(e) => {
-            error!("QuestDB flush 실패 (reason={reason}, rows={rows}): {e}, 재연결 시도");
+            error!(reason = %reason, rows = %rows, error = %e, "QuestDB flush 실패 — 재연결 시도");
             buf.clear();
             *rows = 0;
             match Sender::from_conf(url) {
@@ -124,7 +124,7 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
                     *sender = new;
                     info!("QuestDB 재연결 성공");
                 }
-                Err(e2) => error!("QuestDB 재연결 실패: {e2}"),
+                Err(e2) => error!(error = %e2, "QuestDB 재연결 실패"),
             }
         }
     }
@@ -144,22 +144,12 @@ fn append_trade(buf: &mut Buffer, d: &Trade) -> questdb::Result<()> {
 fn append_depth(buf: &mut Buffer, d: &Depth) -> questdb::Result<()> {
     for i in 0..10 {
         if d.bids.get(i).is_none() {
-            warn!(
-                "depth level 부족: symbol={}, side=bid, level={}, len={}",
-                d.symbol,
-                i + 1,
-                d.bids.len()
-            );
+            warn!(symbol = %d.symbol, side = "bid", level = i + 1, total = d.bids.len(), "depth level 부족");
             return Ok(());
         }
 
         if d.asks.get(i).is_none() {
-            warn!(
-                "depth level 부족: symbol={}, side=ask, level={}, len={}",
-                d.symbol,
-                i + 1,
-                d.asks.len()
-            );
+            warn!(symbol = %d.symbol, side = "ask", level = i + 1, total = d.asks.len(), "depth level 부족");
             return Ok(());
         }
     }

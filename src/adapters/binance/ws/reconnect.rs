@@ -23,7 +23,7 @@ pub async fn run_with_reconnect<S: WsSession>(
     loop {
         tokio::select! {
             _ = token.cancelled() => {
-                info!("{} 종료", cfg.label);
+                info!(label = %cfg.label, "WS 종료");
                 return;
             }
             res = session.run_once(token.clone()) => {
@@ -31,7 +31,7 @@ pub async fn run_with_reconnect<S: WsSession>(
                     Ok(()) => return,
                     Err(e) => {
                         session.on_disconnect().await;
-                        error!("{} 에러:{e} {}s 후 재연결", cfg.label, cfg.reconnect_delay.as_secs());
+                        error!(label = %cfg.label, error = %e, delay_sec = cfg.reconnect_delay.as_secs(), "재연결 예정");
                         tokio::select! {
                             _ = token.cancelled() => return,
                             _ = sleep(cfg.reconnect_delay) => {}

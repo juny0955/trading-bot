@@ -76,6 +76,7 @@ async fn main() -> Result<()> {
 
     let params: serde_json::Value = serde_json::from_str(&args.params)?;
     let strategy = create_strategy(&args.strategy, &params)?;
+    info!(strategy = %args.strategy, params = %args.params, "트레이더 시작");
 
     let position = Arc::new(Mutex::new(Position::default()));
     let (event_tx, event_rx) = mpsc::channel(256);

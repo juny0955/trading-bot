@@ -27,8 +27,8 @@ impl WsSession for OrderStreamSession {
     async fn run_once(&mut self, token: CancellationToken) -> Result<()> {
         let (ws_stream, _) = connect_async(&self.api.order_ws_url)
             .await
-            .inspect_err(|e| error!("Order WS 연결 실패: {e}"))?;
-        info!("Order WS 연결: {}", self.api.order_ws_url);
+            .inspect_err(|e| error!(error = %e, "Order WS 연결 실패"))?;
+        info!(url = %self.api.order_ws_url, "Order WS 연결");
         let (mut write, mut read) = ws_stream.split();
 
         loop {
@@ -69,7 +69,7 @@ impl WsSession for OrderStreamSession {
         let n = p.len();
         p.clear();
         if n > 0 {
-            warn!("Order WS 재연결 — 대기 중 요청 {} 건 실패 처리", n);
+            warn!(count = n, "Order WS 재연결 — 대기 중 요청 실패 처리");
         }
     }
 }

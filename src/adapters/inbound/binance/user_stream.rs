@@ -31,8 +31,8 @@ impl WsSession for UserStreamSession {
         let url = format!("{}/{}", self.api.user_stream_base, listen_key);
         let (ws_stream, _) = connect_async(&url)
             .await
-            .inspect_err(|e| error!("User WS 연결 실패: {e}"))?;
-        info!("User WS 연결됨: {}", url);
+            .inspect_err(|e| error!(error = %e, "User WS 연결 실패"))?;
+        info!(url = %url, "User WS 연결됨");
         let (mut write, mut read) = ws_stream.split();
 
         let mut renew_interval = time::interval(Duration::from_secs(30 * 60));
@@ -47,20 +47,27 @@ impl WsSession for UserStreamSession {
                 }
                 _ = renew_interval.tick() => {
                     if let Err(e) = self.api.renew_listen_key(&listen_key).await {
-                          warn!("User WS listenKey 갱신 실패: {e}");
+                          warn!(error = %e, "User WS listenKey 갱신 실패");
                           return Err(anyhow!("listenKey 갱신 실패"));
                     }
-                    info!("User WS listenKey 갱신됨");
+                    info!("User WS listenKey 갱신 성공");
                 }
                 msg = time::timeout(Duration::from_secs(60), read.next()) => {
                     match msg {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            if let Ok(val) = serde_json::from_str::<Value>(&text) &&
-                            let Ok(dto) = BinanceOrderTradeUpdate::from_value(&val) {
-                                let event = dto.into_execution_event();
-                                let _ = self.tx.send(event).await.ok();
-                            } else {
-                                warn!("ORDER_TRADE_UPDATE 파싱 실패");
+                            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                                match BinanceOrderTradeUpdate::from_value(&val) {
+                                    Ok(dto) => {
+                                        let event = dto.into_execution_event();
+                                        if self.tx.send(event).await.is_err() {
+                                            warn!("OrderExecutionEvent 채널 닫힘 — 체결 이벤트 손실");
+                                            return Ok(());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "ORDER_TRADE_UPDATE 파싱 실패");
+                                    }
+                                }
                             }
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {

@@ -31,14 +31,11 @@ impl AccountEventHandler {
         let order = match self.repo.find_by_exchange_id(event.exchange_order_id).await {
             Ok(Some(o)) => o,
             Ok(None) => {
-                warn!(
-                    "ORDER_TRADE_UPDATE: orderId={} DB에 없음",
-                    event.exchange_order_id
-                );
+                warn!(order_id = event.exchange_order_id, "ORDER_TRADE_UPDATE DB에 없음");
                 return;
             }
             Err(e) => {
-                error!("ORDER_TRADE_UPDATE DB 조회 실패: {e}");
+                error!(error = %e, "ORDER_TRADE_UPDATE DB 조회 실패");
                 return;
             }
         };
@@ -56,13 +53,10 @@ impl AccountEventHandler {
             };
 
             if let Err(e) = self.repo.record_fill(&fill).await {
-                error!("Fill PG 저장 실패: {e}");
+                error!(error = %e, "Fill PG 저장 실패");
             }
             self.fill_sink.emit(fill).await;
-            info!(
-                "Fill 수신: symbol={}, side={:?}, qty={}, price={}",
-                order.symbol, fd.side, fd.qty, fd.price
-            );
+            info!(symbol = %order.symbol, side = ?fd.side, qty = %fd.qty, price = %fd.price, "Fill 수신");
         }
 
         if let Some(status) = event.new_status {
@@ -71,8 +65,15 @@ impl AccountEventHandler {
             updated.filled_qty = event.cumulative_filled_qty;
             updated.avg_fill_price = event.avg_fill_price;
             updated.updated_at = Utc::now();
-            if let Err(e) = self.repo.upsert_order(&updated).await {
-                error!("ORDER_TRADE_UPDATE 주문 갱신 실패: {e}");
+            match self.repo.upsert_order(&updated).await {
+                Ok(()) => info!(
+                    order_id = %updated.id,
+                    symbol = %updated.symbol,
+                    new_status = ?status,
+                    filled_qty = %updated.filled_qty,
+                    "주문 상태 갱신"
+                ),
+                Err(e) => error!(error = %e, "ORDER_TRADE_UPDATE 주문 갱신 실패"),
             }
         }
     }
@@ -81,6 +82,9 @@ impl AccountEventHandler {
 #[async_trait::async_trait]
 impl FillSink for Sender<Fill> {
     async fn emit(&self, fill: Fill) {
-        let _ = self.send(fill).await;
+        let symbol = fill.symbol.clone();
+        if self.send(fill).await.is_err() {
+            warn!(symbol = %symbol, "Fill 채널 닫힘 — 체결 데이터 손실");
+        }
     }
 }
