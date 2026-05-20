@@ -26,12 +26,14 @@
 - **Position**: 현재 보유 중인 포지션 정보 (방향, 수량, 진입가, 진입 시각)
 
 ### 3. 통합 이벤트 (Events)
-- **MarketDataEvent**: 다양한 시장 데이터를 하나의 열거형(Enum)으로 통합하여 처리 효율성을 높입니다.
+시스템 내의 비동기 통신을 위해 다음 두 가지 핵심 이벤트 모델을 사용합니다.
+- **MarketDataEvent**: 다양한 시장 데이터를 하나의 열거형(Enum)으로 통합하여 처리 효율성을 높입니다. 수집기(Collector)와 전략 실행 시 주된 입력값이 됩니다.
+- **OrderExecutionEvent**: `src/application/order_execution_event.rs`에 정의되어 있으며, 거래소로부터 수신한 주문 상태 변경 및 체결 정보를 담고 있습니다. 이는 계층 간 결합도를 낮추면서 주문 상태를 최신으로 유지하는 데 사용됩니다.
 
 ## 💡 핵심 비즈니스 로직
 
 ### 데이터 수집 (Collection)
-- **인바운드 포트(LiveMarketFeed)**: 외부 거래소의 실시간 스트림을 구독합니다.
+- **인바운드 포트(MarketDataProvider)**: 외부 거래소의 실시간 스트림을 구독합니다.
 - **아웃바운드 포트(MarketDataSink)**: 수집된 데이터를 QuestDB 등 저장소에 배치(Batch) 방식으로 저장하여 고속 쓰기를 실현합니다.
 
 ### 백테스트 엔진 (Backtest Engine)

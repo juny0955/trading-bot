@@ -2,6 +2,33 @@
 
 이 문서는 `trading-bot` 프로젝트의 주요 변경 사항 및 업데이트 내역을 기록합니다.
 
+## [v0.2.2] - 2026-05-20
+
+### 🏗️ 컴포넌트 명칭 표준화 및 리팩토링 (Component Renaming & Refactoring)
+- **명명 규칙 통일**: "Feed" 대신 "Provider", "Writer" 대신 "Sink" 등 인터페이스와 구현체의 역할을 명확히 하는 명칭으로 변경하였습니다.
+    - `LiveMarketFeed` -> `MarketDataProvider` (Port)
+    - `BinanceLiveFeed` -> `BinanceMarketProvider` (Adapter)
+    - `Collector` -> `MarketDataCollector` (Application)
+    - `Trader` -> `LiveTrader` (Application)
+    - `QuestDbWriter` -> `QuestDbSink` (Adapter)
+- **파일 구조 정비**: 클래스명과 파일명을 일치시켜 코드 탐색 효율을 높였습니다.
+    - `market_stream.rs` -> `binance_market_provider.rs`
+    - `collector.rs` -> `market_data_collector.rs`
+    - `trader.rs` -> `live_trader.rs`
+    - `config_repo.rs` -> `postgres_config_repository.rs` 등
+- **부트스트랩 로직 분리**: `src/init.rs`에서 어플리케이션 초기화 로직을 `src/bootstrap.rs`로 분리하여 구조를 개선하였습니다.
+
+## [v0.2.1] - 2026-05-20
+
+### 📝 문서화 개선 (Documentation Overhaul)
+- **도메인 가이드 최신화**: `OrderExecutionEvent` 등 누락된 도메인 이벤트를 추가하였습니다.
+- **구조도 정교화**: `adapters/` 하위의 `inbound`, `outbound` 물리적 구조를 반영하고 신규 애플리케이션 서비스를 목록에 추가하였습니다.
+- **실거래 흐름도 추가**: 전략 분석부터 주문 체결 수신까지의 시퀀스 다이어그램을 추가하여 데이터 흐름을 명확히 하였습니다.
+
+### 🏗️ 실거래 기능 안정화 (Live Trading Stabilization)
+- **AccountEventHandler 구현**: 유저 스트림 이벤트를 처리하여 주문 상태를 갱신하고 체결 내역을 DB에 기록하는 로직을 안정화하였습니다.
+- **LiveOrderService 고도화**: 실거래 주문 집행 및 상태 관리 기능을 강화하였습니다.
+
 ## [v0.2.0] - 2026-05-19
 
 ### 🏗️ 아키텍처 개편 (Architectural Changes)
