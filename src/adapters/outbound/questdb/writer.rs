@@ -11,6 +11,23 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+const BID_PRICE_COLS: [&str; 10] = [
+    "bid1_price","bid2_price","bid3_price","bid4_price","bid5_price",
+    "bid6_price","bid7_price","bid8_price","bid9_price","bid10_price",
+];
+const BID_QTY_COLS: [&str; 10] = [
+    "bid1_qty","bid2_qty","bid3_qty","bid4_qty","bid5_qty",
+    "bid6_qty","bid7_qty","bid8_qty","bid9_qty","bid10_qty",
+];
+const ASK_PRICE_COLS: [&str; 10] = [
+    "ask1_price","ask2_price","ask3_price","ask4_price","ask5_price",
+    "ask6_price","ask7_price","ask8_price","ask9_price","ask10_price",
+];
+const ASK_QTY_COLS: [&str; 10] = [
+    "ask1_qty","ask2_qty","ask3_qty","ask4_qty","ask5_qty",
+    "ask6_qty","ask7_qty","ask8_qty","ask9_qty","ask10_qty",
+];
+
 pub struct QuestDbSink {
     url: String,
     cfg: QuestDbRuntimeConfig,
@@ -70,9 +87,8 @@ pub async fn run(
                 match result {
                     Ok(()) => rows += 1,
                     Err(e) => {
-                        warn!("Market data append 실패 누적 buffer 폐기: {e}");
-                        buf.clear();
-                        rows = 0;
+                        warn!("Market data append 실패 (이전 누적 buffer flush 시도): {e}");
+                        flush_if_any(&mut sender, &mut buf, &mut rows, url, "append_error");
                     }
                 }
 
@@ -154,10 +170,10 @@ fn append_depth(buf: &mut Buffer, d: &Depth) -> questdb::Result<()> {
         .column_i64("last_update_id", d.last_update_id)?;
 
     for i in 0..10 {
-        row.column_dec(format!("bid{}_price", i + 1).as_str(), &d.bids[i].price)?
-            .column_dec(format!("bid{}_qty", i + 1).as_str(), &d.bids[i].quantity)?
-            .column_dec(format!("ask{}_price", i + 1).as_str(), &d.asks[i].price)?
-            .column_dec(format!("ask{}_qty", i + 1).as_str(), &d.asks[i].quantity)?;
+        row.column_dec(BID_PRICE_COLS[i], &d.bids[i].price)?
+            .column_dec(BID_QTY_COLS[i], &d.bids[i].quantity)?
+            .column_dec(ASK_PRICE_COLS[i], &d.asks[i].price)?
+            .column_dec(ASK_QTY_COLS[i], &d.asks[i].quantity)?;
     }
 
     row.at(TimestampNanos::new(d.event_time_ns))?;
