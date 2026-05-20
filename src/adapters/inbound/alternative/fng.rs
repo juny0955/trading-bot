@@ -1,3 +1,4 @@
+use std::option::Option;
 use std::time::Duration;
 
 use crate::adapters::inbound::alternative::dto::{FngData, FngResponse};
@@ -5,8 +6,9 @@ use crate::config::AlternativeRuntimeConfig;
 use crate::domain::event::MarketDataEvent;
 use crate::ports::fng_feed::FngFeed;
 use async_trait::async_trait;
-use tokio::sync::mpsc;
-use tokio::{sync::mpsc::Sender, time::sleep};
+use tokio::sync::watch::Sender;
+use tokio::sync::{mpsc, watch};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -24,18 +26,32 @@ impl AlternativeFngFeed {
 
 #[async_trait]
 impl FngFeed for AlternativeFngFeed {
-    async fn run(self: Box<Self>, market_tx: Sender<MarketDataEvent>, token: CancellationToken) {
-        let (fng_tx, mut fng_rx) = mpsc::channel::<FngData>(1);
+    async fn run(
+        self: Box<Self>,
+        market_tx: mpsc::Sender<MarketDataEvent>,
+        token: CancellationToken,
+    ) {
+        let (tx, rx) = watch::channel::<Option<FngData>>(None);
         let fetch_token = token.clone();
 
         let fetch_handle = tokio::spawn(async move {
-            fetch_alternative_fng(self.cfg, fng_tx, fetch_token).await;
+            fetch_alternative_fng(self.cfg, tx, fetch_token).await;
         });
 
-        while let Some(fng) = fng_rx.recv().await {
-            if let Err(e) = market_tx.send(fng.into()).await {
-                warn!(error = %e, "QuestDB Tx 채널 닫힘");
-                break;
+        let mut rx = rx;
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => break,
+                result = rx.changed() => match result {
+                    Ok(()) => {
+                        let Some(fng) = rx.borrow_and_update().clone() else { continue };
+                        if let Err(e) = market_tx.send(fng.into()).await {
+                            warn!(error = %e, "QuestDB Tx 채널 닫힘");
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
             }
         }
 
@@ -46,7 +62,7 @@ impl FngFeed for AlternativeFngFeed {
 
 pub async fn fetch_alternative_fng(
     cfg: AlternativeRuntimeConfig,
-    tx: Sender<FngData>,
+    tx: Sender<Option<FngData>>,
     token: CancellationToken,
 ) {
     loop {
@@ -66,7 +82,10 @@ pub async fn fetch_alternative_fng(
     info!("Alternative 수신 종료");
 }
 
-async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Option<Duration> {
+async fn fetch_once(
+    cfg: &AlternativeRuntimeConfig,
+    tx: &Sender<Option<FngData>>,
+) -> Option<Duration> {
     let resp = match reqwest::get(URL).await {
         Ok(r) => r,
         Err(e) => {
@@ -93,10 +112,7 @@ async fn fetch_once(cfg: &AlternativeRuntimeConfig, tx: &Sender<FngData>) -> Opt
         .parse::<u64>()
         .unwrap_or(cfg.fallback_interval_sec);
 
-    if let Err(e) = tx.send(data).await {
-        warn!(error = %e, "FNG 채널 닫힘");
-        return None;
-    }
+    tx.send_replace(Some(data));
 
     Some(Duration::from_secs(interval))
 }

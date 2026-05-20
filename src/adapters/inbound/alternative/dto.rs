@@ -8,7 +8,7 @@ pub struct FngResponse {
     pub data: Vec<FngData>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum FngStatus {
     #[serde(rename = "Extreme Fear")]
     ExtremeFear,
@@ -34,7 +34,7 @@ impl FngStatus {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FngData {
     pub value: String,
     #[serde(rename = "value_classification")]
