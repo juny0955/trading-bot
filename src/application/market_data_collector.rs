@@ -1,7 +1,7 @@
 use crate::domain::event::MarketDataEvent;
 use crate::ports::collection_use_case::CollectionUseCase;
-use crate::ports::fng_feed::FngFeed;
-use crate::ports::live_market_feed::LiveMarketFeed;
+use crate::ports::fng_provider::FngProvider;
+use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::market_data_sink::MarketDataSink;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -10,26 +10,26 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-pub struct Collector;
+pub struct MarketDataCollector;
 
-impl Default for Collector {
+impl Default for MarketDataCollector {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Collector {
+impl MarketDataCollector {
     pub fn new() -> Self {
         Self
     }
 }
 
 #[async_trait]
-impl CollectionUseCase for Collector {
+impl CollectionUseCase for MarketDataCollector {
     async fn run(
         self: Box<Self>,
-        feed: Box<dyn LiveMarketFeed>,
-        fng: Box<dyn FngFeed>,
+        feed: Box<dyn MarketDataProvider>,
+        fng: Box<dyn FngProvider>,
         sink: Box<dyn MarketDataSink>,
     ) -> Result<()> {
         let (market_tx, market_rx) = mpsc::channel::<MarketDataEvent>(1000);

@@ -82,12 +82,12 @@ impl From<DbFill> for Fill {
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
-pub struct PgOrderRepository {
+pub struct PostgresOrderRepository {
     pool: PgPool,
 }
 
 #[async_trait]
-impl OrderRepository for PgOrderRepository {
+impl OrderRepository for PostgresOrderRepository {
     async fn upsert_order(&self, order: &Order) -> Result<(), RepositoryError> {
         Self::upsert_order(self, order).await
     }
@@ -112,7 +112,7 @@ impl OrderRepository for PgOrderRepository {
     }
 }
 
-impl PgOrderRepository {
+impl PostgresOrderRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }

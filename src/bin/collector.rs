@@ -1,8 +1,8 @@
 use anyhow::Result;
-use trading_bot::adapters::inbound::alternative::fng::AlternativeFngFeed;
-use trading_bot::adapters::inbound::binance::market_stream::BinanceLiveFeed;
+use trading_bot::adapters::inbound::alternative::alternative_fng_provider::AlternativeFngProvider;
+use trading_bot::adapters::inbound::binance::binance_market_provider::BinanceMarketProvider;
 use trading_bot::adapters::outbound::questdb::writer::QuestDbSink;
-use trading_bot::application::collector::Collector;
+use trading_bot::application::market_data_collector::MarketDataCollector;
 use trading_bot::bootstrap::AppBootstrap;
 use trading_bot::ports::collection_use_case::CollectionUseCase;
 
@@ -12,11 +12,11 @@ async fn main() -> Result<()> {
 
     let quest_db_url = std::env::var("QUESTDB_URL").expect("QuestDB URL 없음");
 
-    let feed = Box::new(BinanceLiveFeed::new(
+    let feed = Box::new(BinanceMarketProvider::new(
         boot.binance_cfg.clone(),
         boot.config.runtime.binance.clone(),
     ));
-    let fng = Box::new(AlternativeFngFeed::new(
+    let fng = Box::new(AlternativeFngProvider::new(
         boot.config.runtime.alternative.clone(),
     ));
     let sink = Box::new(QuestDbSink::new(
@@ -24,5 +24,5 @@ async fn main() -> Result<()> {
         boot.config.runtime.questdb.clone(),
     ));
 
-    Box::new(Collector).run(feed, fng, sink).await
+    Box::new(MarketDataCollector).run(feed, fng, sink).await
 }

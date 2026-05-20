@@ -1,4 +1,4 @@
-use crate::adapters::outbound::postgres::config_repo::PgConfigRepository;
+use crate::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
 use crate::adapters::outbound::postgres::pool::init_db;
 use crate::config::AppConfig;
 use crate::config::binance_config::BinanceConfig;
@@ -18,7 +18,7 @@ impl AppBootstrap {
     pub async fn init() -> Result<Self> {
         setup();
         let pool = init_db().await?;
-        let config = Arc::new(PgConfigRepository::new(pool.clone()).load().await?);
+        let config = Arc::new(PostgresConfigRepository::new(pool.clone()).load().await?);
         let binance_cfg = config.binance.clone();
         Ok(Self {
             pool,

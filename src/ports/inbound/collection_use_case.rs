@@ -1,5 +1,5 @@
-use crate::ports::fng_feed::FngFeed;
-use crate::ports::live_market_feed::LiveMarketFeed;
+use crate::ports::fng_provider::FngProvider;
+use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::market_data_sink::MarketDataSink;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -8,8 +8,8 @@ use async_trait::async_trait;
 pub trait CollectionUseCase: Send {
     async fn run(
         self: Box<Self>,
-        feed: Box<dyn LiveMarketFeed>,
-        fng: Box<dyn FngFeed>,
+        feed: Box<dyn MarketDataProvider>,
+        fng: Box<dyn FngProvider>,
         sink: Box<dyn MarketDataSink>,
     ) -> Result<()>;
 }

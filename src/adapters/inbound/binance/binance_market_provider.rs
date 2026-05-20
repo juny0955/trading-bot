@@ -3,11 +3,11 @@ use std::time::Duration;
 use crate::adapters::binance::ws::reconnect::{
     ReconnectConfig, WsError, WsSession, run_with_reconnect,
 };
-use crate::adapters::inbound::binance::dto::{StreamData, StreamEnvelope};
+use crate::adapters::inbound::binance::dto::{BinanceStreamData, BinanceStreamEnvelope};
 use crate::config::BinanceRuntimeConfig;
 use crate::config::binance_config::BinanceConfig;
 use crate::domain::event::MarketDataEvent;
-use crate::ports::live_market_feed::LiveMarketFeed;
+use crate::ports::market_data_provider::MarketDataProvider;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -21,21 +21,21 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-pub struct BinanceLiveFeed {
+pub struct BinanceMarketProvider {
     cfg: BinanceConfig,
     runtime_cfg: BinanceRuntimeConfig,
 }
 
-impl BinanceLiveFeed {
+impl BinanceMarketProvider {
     pub fn new(cfg: BinanceConfig, runtime_cfg: BinanceRuntimeConfig) -> Self {
         Self { cfg, runtime_cfg }
     }
 }
 
 #[async_trait]
-impl LiveMarketFeed for BinanceLiveFeed {
+impl MarketDataProvider for BinanceMarketProvider {
     async fn run(self: Box<Self>, market_tx: Sender<MarketDataEvent>, token: CancellationToken) {
-        let (stream_tx, mut stream_rx) = mpsc::channel::<StreamData>(100);
+        let (stream_tx, mut stream_rx) = mpsc::channel::<BinanceStreamData>(100);
 
         let public_url = self.cfg.public_ws_url();
         let public_runtime = self.runtime_cfg.clone();
@@ -81,7 +81,7 @@ impl LiveMarketFeed for BinanceLiveFeed {
             r = &mut forward_h => ("Forward", r),
         };
         if let Err(e) = result {
-            error!(task = task, error = ?e, "BinanceLiveFeed Task 비정상 종료");
+            error!(task = task, error = ?e, "BinanceMarketProvider Task 비정상 종료");
         }
 
         token.cancel();
@@ -95,12 +95,12 @@ pub async fn subscribe_to_binance_futures_stream(
     url: String,
     stream_type: &str,
     runtime_cfg: BinanceRuntimeConfig,
-    tx: Sender<StreamData>,
+    tx: Sender<BinanceStreamData>,
     token: CancellationToken,
 ) {
     let label = format!("Binance {stream_type}");
     run_with_reconnect(
-        BinanceStreamSession {
+        BinanceMarketSession {
             url,
             tx,
             stream_type: stream_type.into(),
@@ -112,15 +112,15 @@ pub async fn subscribe_to_binance_futures_stream(
     .await
 }
 
-struct BinanceStreamSession {
+struct BinanceMarketSession {
     url: String,
     stream_type: String,
-    tx: Sender<StreamData>,
+    tx: Sender<BinanceStreamData>,
     read_timeout: Duration,
 }
 
 #[async_trait]
-impl WsSession for BinanceStreamSession {
+impl WsSession for BinanceMarketSession {
     async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
         stream(
             &self.url,
@@ -137,7 +137,7 @@ impl WsSession for BinanceStreamSession {
 async fn stream(
     url: &str,
     stream_type: &str,
-    tx: &Sender<StreamData>,
+    tx: &Sender<BinanceStreamData>,
     token: &CancellationToken,
     read_timeout: Duration,
 ) -> Result<()> {
@@ -161,7 +161,7 @@ async fn stream(
                     Err(_) => return Err(anyhow!("Binance {stream_type} WS 타임아웃 {}s", read_timeout.as_secs())),
                 };
                 match msg {
-                    Ok(Message::Text(text)) => match serde_json::from_str::<StreamEnvelope>(&text) {
+                    Ok(Message::Text(text)) => match serde_json::from_str::<BinanceStreamEnvelope>(&text) {
                         Ok(envelope) => {
                             if let Err(e) = tx.send(envelope.data).await {
                                 warn!(stream_type = %stream_type, error = %e, "Binance Stream 채널 닫힘");

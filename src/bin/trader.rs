@@ -7,14 +7,14 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use trading_bot::adapters::binance::api::BinanceOrderApi;
-use trading_bot::adapters::inbound::binance::market_stream::BinanceLiveFeed;
+use trading_bot::adapters::inbound::binance::binance_market_provider::BinanceMarketProvider;
 use trading_bot::adapters::inbound::binance::user_stream::BinanceUserStreamHandler;
 use trading_bot::adapters::outbound::binance::order::executor::BinanceOrderExecutor;
 use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
-use trading_bot::adapters::outbound::postgres::order_repo::PgOrderRepository;
+use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::live_order_service::LiveOrderService;
-use trading_bot::application::trader::Trader;
+use trading_bot::application::live_trader::LiveTrader;
 use trading_bot::bootstrap::AppBootstrap;
 use trading_bot::domain::backtest::Position;
 use trading_bot::domain::order::Fill;
@@ -58,12 +58,12 @@ async fn main() -> Result<()> {
 
     let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &boot.binance_cfg)?;
 
-    let repo = Arc::new(PgOrderRepository::new(boot.pool));
+    let repo = Arc::new(PostgresOrderRepository::new(boot.pool));
     let executor = Arc::new(BinanceOrderExecutor::new(api.clone()));
     let order_svc: Arc<dyn OrderService> = Arc::new(LiveOrderService::new(executor, repo.clone()));
-    let trader = Box::new(Trader::new(order_svc));
+    let trader = Box::new(LiveTrader::new(order_svc));
 
-    let feed = Box::new(BinanceLiveFeed::new(
+    let feed = Box::new(BinanceMarketProvider::new(
         boot.binance_cfg.clone(),
         boot.config.runtime.binance.clone(),
     ));

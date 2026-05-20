@@ -3,7 +3,7 @@ use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
 use crate::domain::order::OrderSide;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
-use crate::ports::live_market_feed::LiveMarketFeed;
+use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::order_service::OrderService;
 use crate::ports::trading_use_case::TradingUseCase;
 use anyhow::Result;
@@ -15,21 +15,21 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-pub struct Trader {
+pub struct LiveTrader {
     order_svc: Arc<dyn OrderService>,
 }
 
-impl Trader {
+impl LiveTrader {
     pub fn new(order_svc: Arc<dyn OrderService>) -> Self {
         Self { order_svc }
     }
 }
 
 #[async_trait]
-impl TradingUseCase for Trader {
+impl TradingUseCase for LiveTrader {
     async fn run(
         self: Box<Self>,
-        feed: Box<dyn LiveMarketFeed>,
+        feed: Box<dyn MarketDataProvider>,
         mut strategy: Box<dyn Strategy>,
         position: Arc<Mutex<Position>>,
         token: CancellationToken,

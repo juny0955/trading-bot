@@ -7,18 +7,18 @@ use anyhow::{Result, bail};
 use async_trait::async_trait;
 use sqlx::{PgPool, query};
 
-pub struct PgConfigRepository {
+pub struct PostgresConfigRepository {
     pool: PgPool,
 }
 
 #[async_trait]
-impl ConfigRepository for PgConfigRepository {
+impl ConfigRepository for PostgresConfigRepository {
     async fn load(&self) -> Result<AppConfig> {
         Self::load_config(&self.pool).await
     }
 }
 
-impl PgConfigRepository {
+impl PostgresConfigRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }

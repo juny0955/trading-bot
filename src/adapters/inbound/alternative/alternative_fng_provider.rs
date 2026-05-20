@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::adapters::inbound::alternative::dto::{FngData, FngResponse};
 use crate::config::AlternativeRuntimeConfig;
 use crate::domain::event::MarketDataEvent;
-use crate::ports::fng_feed::FngFeed;
+use crate::ports::fng_provider::FngProvider;
 use async_trait::async_trait;
 use tokio::sync::watch::Sender;
 use tokio::sync::{mpsc, watch};
@@ -14,18 +14,18 @@ use tracing::{error, info, warn};
 
 const URL: &str = "https://api.alternative.me/fng/";
 
-pub struct AlternativeFngFeed {
+pub struct AlternativeFngProvider {
     cfg: AlternativeRuntimeConfig,
 }
 
-impl AlternativeFngFeed {
+impl AlternativeFngProvider {
     pub fn new(cfg: AlternativeRuntimeConfig) -> Self {
         Self { cfg }
     }
 }
 
 #[async_trait]
-impl FngFeed for AlternativeFngFeed {
+impl FngProvider for AlternativeFngProvider {
     async fn run(
         self: Box<Self>,
         market_tx: mpsc::Sender<MarketDataEvent>,

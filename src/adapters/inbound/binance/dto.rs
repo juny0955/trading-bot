@@ -5,28 +5,28 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct StreamEnvelope {
+pub struct BinanceStreamEnvelope {
     pub stream: String,
-    pub data: StreamData,
+    pub data: BinanceStreamData,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "e")]
-pub enum StreamData {
+pub enum BinanceStreamData {
     #[serde(rename = "trade")]
-    Trade(TradeData),
+    Trade(BinanceTradeData),
     #[serde(rename = "depthUpdate")]
-    Depth(DepthData),
+    Depth(BinanceDepthData),
     #[serde(rename = "bookTicker")]
-    BookTicker(BookTickerData),
+    BookTicker(BinanceBookTickerData),
     #[serde(rename = "kline")]
-    Kline(KlineData),
+    Kline(BinanceKlineData),
     #[serde(rename = "markPriceUpdate")]
-    MarkPrice(MarkPriceData),
+    MarkPrice(BinanceMarkPriceData),
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TradeData {
+pub struct BinanceTradeData {
     #[serde(rename = "s")]
     pub symbol: String,
     #[serde(rename = "p")]
@@ -40,10 +40,10 @@ pub struct TradeData {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PriceLevel(pub Decimal, pub Decimal);
+pub struct BinancePriceLevel(pub Decimal, pub Decimal);
 
 #[derive(Debug, Deserialize)]
-pub struct DepthData {
+pub struct BinanceDepthData {
     #[serde(rename = "s")]
     pub symbol: String,
     #[serde(rename = "U")]
@@ -51,15 +51,15 @@ pub struct DepthData {
     #[serde(rename = "u")]
     pub last_update_id: i64,
     #[serde(rename = "b")]
-    pub bids: Vec<PriceLevel>,
+    pub bids: Vec<BinancePriceLevel>,
     #[serde(rename = "a")]
-    pub asks: Vec<PriceLevel>,
+    pub asks: Vec<BinancePriceLevel>,
     #[serde(rename = "E")]
     pub event_time: i64,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct BookTickerData {
+pub struct BinanceBookTickerData {
     #[serde(rename = "s")]
     pub symbol: String,
     #[serde(rename = "b")]
@@ -75,7 +75,7 @@ pub struct BookTickerData {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct KlineInner {
+pub struct BinanceKlineInner {
     #[serde(rename = "t")]
     pub open_time: i64,
     #[serde(rename = "o")]
@@ -97,17 +97,17 @@ pub struct KlineInner {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct KlineData {
+pub struct BinanceKlineData {
     #[serde(rename = "s")]
     pub symbol: String,
     #[serde(rename = "E")]
     pub event_time: i64,
     #[serde(rename = "k")]
-    pub kline: KlineInner,
+    pub kline: BinanceKlineInner,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MarkPriceData {
+pub struct BinanceMarkPriceData {
     #[serde(rename = "s")]
     pub symbol: String,
     #[serde(rename = "E")]
@@ -122,8 +122,8 @@ pub struct MarkPriceData {
     pub next_funding_time: i64,
 }
 
-impl From<TradeData> for Trade {
-    fn from(value: TradeData) -> Self {
+impl From<BinanceTradeData> for Trade {
+    fn from(value: BinanceTradeData) -> Self {
         Trade {
             symbol: value.symbol,
             price: value.price,
@@ -133,8 +133,8 @@ impl From<TradeData> for Trade {
         }
     }
 }
-impl From<DepthData> for Depth {
-    fn from(value: DepthData) -> Self {
+impl From<BinanceDepthData> for Depth {
+    fn from(value: BinanceDepthData) -> Self {
         Depth {
             symbol: value.symbol,
             first_update_id: value.first_update_id,
@@ -159,8 +159,8 @@ impl From<DepthData> for Depth {
         }
     }
 }
-impl From<BookTickerData> for BookTicker {
-    fn from(value: BookTickerData) -> Self {
+impl From<BinanceBookTickerData> for BookTicker {
+    fn from(value: BinanceBookTickerData) -> Self {
         BookTicker {
             symbol: value.symbol,
             bid_price: value.bid_price,
@@ -171,8 +171,8 @@ impl From<BookTickerData> for BookTicker {
         }
     }
 }
-impl From<KlineData> for Kline {
-    fn from(value: KlineData) -> Self {
+impl From<BinanceKlineData> for Kline {
+    fn from(value: BinanceKlineData) -> Self {
         Kline {
             symbol: value.symbol,
             event_time_ns: value.event_time * 1_000_000,
@@ -188,8 +188,8 @@ impl From<KlineData> for Kline {
         }
     }
 }
-impl From<MarkPriceData> for MarkPrice {
-    fn from(value: MarkPriceData) -> Self {
+impl From<BinanceMarkPriceData> for MarkPrice {
+    fn from(value: BinanceMarkPriceData) -> Self {
         MarkPrice {
             symbol: value.symbol,
             event_time_ns: value.event_time * 1_000_000,
@@ -201,14 +201,14 @@ impl From<MarkPriceData> for MarkPrice {
     }
 }
 
-impl From<StreamData> for MarketDataEvent {
-    fn from(value: StreamData) -> Self {
+impl From<BinanceStreamData> for MarketDataEvent {
+    fn from(value: BinanceStreamData) -> Self {
         match value {
-            StreamData::Trade(d) => MarketDataEvent::Trade(d.into()),
-            StreamData::Depth(d) => MarketDataEvent::Depth(d.into()),
-            StreamData::BookTicker(d) => MarketDataEvent::BookTicker(d.into()),
-            StreamData::Kline(d) => MarketDataEvent::Kline(d.into()),
-            StreamData::MarkPrice(d) => MarketDataEvent::MarkPrice(d.into()),
+            BinanceStreamData::Trade(d) => MarketDataEvent::Trade(d.into()),
+            BinanceStreamData::Depth(d) => MarketDataEvent::Depth(d.into()),
+            BinanceStreamData::BookTicker(d) => MarketDataEvent::BookTicker(d.into()),
+            BinanceStreamData::Kline(d) => MarketDataEvent::Kline(d.into()),
+            BinanceStreamData::MarkPrice(d) => MarketDataEvent::MarkPrice(d.into()),
         }
     }
 }

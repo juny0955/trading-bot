@@ -4,6 +4,6 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
 #[async_trait]
-pub trait FngFeed: Send + Sync {
+pub trait MarketDataProvider: Send + Sync {
     async fn run(self: Box<Self>, tx: Sender<MarketDataEvent>, token: CancellationToken);
 }

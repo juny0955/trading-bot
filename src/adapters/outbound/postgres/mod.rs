@@ -1,4 +1,4 @@
-pub mod config_repo;
-pub mod order_repo;
+pub mod postgres_config_repository;
+pub mod postgres_order_repository;
 pub mod pool;
 mod type_impls;
