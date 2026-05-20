@@ -1,5 +1,7 @@
 use crate::adapters::binance::api::BinanceOrderApi;
+use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
 use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
@@ -15,44 +17,14 @@ pub struct OrderWsLoop {
     api: Arc<BinanceOrderApi>,
 }
 
-impl OrderWsLoop {
-    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
-        Self { api }
-    }
+struct OrderStreamSession {
+    api: Arc<BinanceOrderApi>,
+    ws_rx: Receiver<String>,
+}
 
-    pub async fn run_order_stream(&self, mut ws_rx: Receiver<String>, token: CancellationToken) {
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    info!("Order WS Worker 종료");
-                    return;
-                }
-                res = self.order_stream_session(&mut ws_rx, token.clone()) => {
-                    if res.is_ok() { return; }
-                    let pending_count = {
-                        let mut p = self.api.pending.lock().await;
-                        let n = p.len();
-                        p.clear();
-                        n
-                    };
-                    if pending_count > 0 {
-                        warn!("Order WS 재연결 — 대기 중 요청 {} 건 실패 처리", pending_count);
-                    }
-                    error!("Order WS 에러, 3초 후 재연결");
-                    tokio::select! {
-                        _ = token.cancelled() => return,
-                        _ = time::sleep(Duration::from_secs(3)) => {}
-                    }
-                }
-            }
-        }
-    }
-
-    async fn order_stream_session(
-        &self,
-        ws_rx: &mut Receiver<String>,
-        token: CancellationToken,
-    ) -> Result<()> {
+#[async_trait]
+impl WsSession for OrderStreamSession {
+    async fn run_once(&mut self, token: CancellationToken) -> Result<()> {
         let (ws_stream, _) = connect_async(&self.api.order_ws_url)
             .await
             .inspect_err(|e| error!("Order WS 연결 실패: {e}"))?;
@@ -66,7 +38,7 @@ impl OrderWsLoop {
                     info!("Order WS Close Frame 전송 후 종료");
                     return Ok(());
                 }
-                msg = ws_rx.recv() => match msg {
+                msg = self.ws_rx.recv() => match msg {
                     Some(text) => { write.send(Message::Text(text.into())).await?; }
                     None => { info!("Order WS 채널 닫힘"); return Ok(()); }
                 },
@@ -90,5 +62,35 @@ impl OrderWsLoop {
                 }
             }
         }
+    }
+
+    async fn on_disconnect(&mut self) {
+        let mut p = self.api.pending.lock().await;
+        let n = p.len();
+        p.clear();
+        if n > 0 {
+            warn!("Order WS 재연결 — 대기 중 요청 {} 건 실패 처리", n);
+        }
+    }
+}
+
+impl OrderWsLoop {
+    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
+        Self { api }
+    }
+
+    pub async fn run_order_stream(&self, ws_rx: Receiver<String>, token: CancellationToken) {
+        run_with_reconnect(
+            OrderStreamSession {
+                api: Arc::clone(&self.api),
+                ws_rx,
+            },
+            ReconnectConfig {
+                label: "Order WS".to_string(),
+                reconnect_delay: Duration::from_secs(3),
+            },
+            token,
+        )
+        .await;
     }
 }

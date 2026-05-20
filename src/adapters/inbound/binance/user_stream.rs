@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use crate::adapters::binance::api::BinanceOrderApi;
 use crate::adapters::binance::dto_account::BinanceOrderTradeUpdate;
+use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
 use crate::application::order_execution_event::OrderExecutionEvent;
 use anyhow::anyhow;
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::mpsc::Sender;
@@ -17,35 +19,14 @@ pub struct BinanceUserStreamHandler {
     api: Arc<BinanceOrderApi>,
 }
 
-impl BinanceUserStreamHandler {
-    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
-        Self { api }
-    }
+struct UserStreamSession {
+    api: Arc<BinanceOrderApi>,
+    tx: Sender<OrderExecutionEvent>,
+}
 
-    pub async fn run_user_stream(&self, tx: Sender<OrderExecutionEvent>, token: CancellationToken) {
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    info!("User WS Worker 종료");
-                    return;
-                }
-                res = self.user_stream_session(&tx, token.clone()) => {
-                    if res.is_ok() { return; }
-                    error!("User WS 에러, 3초 후 재연결");
-                    tokio::select! {
-                        _ = token.cancelled() => return,
-                        _ = time::sleep(Duration::from_secs(3)) => {}
-                    }
-                }
-            }
-        }
-    }
-
-    async fn user_stream_session(
-        &self,
-        tx: &Sender<OrderExecutionEvent>,
-        token: CancellationToken,
-    ) -> anyhow::Result<()> {
+#[async_trait]
+impl WsSession for UserStreamSession {
+    async fn run_once(&mut self, token: CancellationToken) -> anyhow::Result<()> {
         let listen_key = self.api.get_listen_key().await?;
         let url = format!("{}/{}", self.api.user_stream_base, listen_key);
         let (ws_stream, _) = connect_async(&url)
@@ -77,7 +58,7 @@ impl BinanceUserStreamHandler {
                             if let Ok(val) = serde_json::from_str::<Value>(&text) &&
                             let Ok(dto) = BinanceOrderTradeUpdate::from_value(&val) {
                                 let event = dto.into_execution_event();
-                                let _ = tx.send(event).await.ok();
+                                let _ = self.tx.send(event).await.ok();
                             } else {
                                 warn!("ORDER_TRADE_UPDATE 파싱 실패");
                             }
@@ -95,5 +76,26 @@ impl BinanceUserStreamHandler {
                 }
             }
         }
+    }
+}
+
+impl BinanceUserStreamHandler {
+    pub fn new(api: Arc<BinanceOrderApi>) -> Self {
+        Self { api }
+    }
+
+    pub async fn run_user_stream(&self, tx: Sender<OrderExecutionEvent>, token: CancellationToken) {
+        run_with_reconnect(
+            UserStreamSession {
+                api: Arc::clone(&self.api),
+                tx,
+            },
+            ReconnectConfig {
+                label: "User WS".to_string(),
+                reconnect_delay: Duration::from_secs(3),
+            },
+            token,
+        )
+        .await
     }
 }

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
 use crate::adapters::inbound::binance::dto::{StreamData, StreamEnvelope};
 use crate::config::BinanceRuntimeConfig;
 use crate::config::binance_config::BinanceConfig;
@@ -10,14 +11,14 @@ use async_trait::async_trait;
 use futures_util::future::join_all;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tokio::time::timeout;
-use tokio::{sync::mpsc::Sender, time::sleep};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{Message, client::IntoClientRequest},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 pub struct BinanceLiveFeed {
     cfg: BinanceConfig,
@@ -85,28 +86,41 @@ pub async fn subscribe_to_binance_futures_stream(
     tx: Sender<StreamData>,
     token: CancellationToken,
 ) {
-    let read_timeout = Duration::from_secs(runtime_cfg.read_timeout_sec);
+    let label = format!("Binance {stream_type}");
+    run_with_reconnect(
+        BinanceStreamSession {
+            url,
+            tx,
+            stream_type: stream_type.into(),
+            read_timeout: Duration::from_secs(runtime_cfg.read_timeout_sec),
+        },
+        ReconnectConfig {
+            label,
+            reconnect_delay: Duration::from_secs(runtime_cfg.reconnect_delay_sec),
+        },
+        token,
+    )
+    .await
+}
 
-    loop {
-        tokio::select! {
-            _ = token.cancelled() => {
-                info!("Binance {stream_type} WS 스트림 종료");
-                return;
-            },
-            res = stream(&url, stream_type, &tx, &token, read_timeout) => match res {
-                Ok(()) => break,
-                Err(e) => {
-                    error!(
-                        "Binance {stream_type} WS 에러: {e}, {}초 후 재시도",
-                        runtime_cfg.reconnect_delay_sec
-                    );
-                    tokio::select! {
-                        _ = token.cancelled() => return,
-                        _ = sleep(Duration::from_secs(runtime_cfg.reconnect_delay_sec)) => {}
-                    }
-                }
-            }
-        }
+struct BinanceStreamSession {
+    url: String,
+    stream_type: String,
+    tx: Sender<StreamData>,
+    read_timeout: Duration,
+}
+
+#[async_trait]
+impl WsSession for BinanceStreamSession {
+    async fn run_once(&mut self, token: CancellationToken) -> Result<()> {
+        stream(
+            &self.url,
+            &self.stream_type,
+            &self.tx,
+            &token,
+            self.read_timeout,
+        )
+        .await
     }
 }
 

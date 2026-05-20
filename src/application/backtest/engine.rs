@@ -35,24 +35,6 @@ pub struct BacktestResult {
     pub equity_curve: Vec<EquityPoint>,
 }
 
-pub struct BacktestEngine<E: OrderExecutor> {
-    executor: E,
-}
-
-impl<E: OrderExecutor> BacktestEngine<E> {
-    async fn handle(&self, commands: Vec<StrategyCommand>) -> Result<()> {
-        for cmd in commands {
-            match cmd {
-                StrategyCommand::SubmitOrder(req) => {
-                    self.executor.submit(req).await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
 pub async fn run(
     src: &dyn MarketDataSource,
     cfg: BacktestConfig,

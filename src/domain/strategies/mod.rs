@@ -20,7 +20,7 @@ pub trait Strategy: Send {
     fn on_start(&mut self, _ctx: &Context) -> Vec<StrategyCommand> {
         vec![]
     }
-    fn on_bar(&mut self, bar: &Bar, ctx: &Context) -> Vec<StrategyCommand> {
+    fn on_bar(&mut self, _bar: &Bar, _ctx: &Context) -> Vec<StrategyCommand> {
         vec![]
     }
     fn on_depth(&mut self, _snap: &DepthSnapshot, _ctx: &Context) -> Vec<StrategyCommand> {
