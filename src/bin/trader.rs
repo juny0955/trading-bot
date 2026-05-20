@@ -11,17 +11,14 @@ use trading_bot::adapters::inbound::binance::market_stream::BinanceLiveFeed;
 use trading_bot::adapters::inbound::binance::user_stream::BinanceUserStreamHandler;
 use trading_bot::adapters::outbound::binance::order::executor::BinanceOrderExecutor;
 use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
-use trading_bot::adapters::outbound::postgres::config_repo::PgConfigRepository;
 use trading_bot::adapters::outbound::postgres::order_repo::PgOrderRepository;
-use trading_bot::adapters::outbound::postgres::pool::init_db;
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::live_order_service::LiveOrderService;
 use trading_bot::application::trader::Trader;
+use trading_bot::bootstrap::AppBootstrap;
 use trading_bot::domain::backtest::Position;
 use trading_bot::domain::order::Fill;
 use trading_bot::domain::strategies::create_strategy;
-use trading_bot::init;
-use trading_bot::ports::config_repository::ConfigRepository;
 use trading_bot::ports::fill_sink::FillSink;
 use trading_bot::ports::order_service::OrderService;
 use trading_bot::ports::trading_use_case::TradingUseCase;
@@ -53,25 +50,22 @@ impl FillSink for LogFillSink {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init::setup();
+    let boot = AppBootstrap::init().await?;
     let args = Args::parse();
-
-    let pool = init_db().await?;
-    let cfg = Arc::new(PgConfigRepository::new(pool.clone()).load().await?);
 
     let api_key = std::env::var("BINANCE_API_KEY").expect("BINANCE_API_KEY 없음");
     let secret = std::env::var("BINANCE_SECRET").expect("BINANCE_SECRET 없음");
 
-    let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &cfg.binance)?;
+    let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &boot.binance_cfg)?;
 
-    let repo = Arc::new(PgOrderRepository::new(pool));
+    let repo = Arc::new(PgOrderRepository::new(boot.pool));
     let executor = Arc::new(BinanceOrderExecutor::new(api.clone()));
     let order_svc: Arc<dyn OrderService> = Arc::new(LiveOrderService::new(executor, repo.clone()));
     let trader = Box::new(Trader::new(order_svc));
 
     let feed = Box::new(BinanceLiveFeed::new(
-        cfg.binance.clone(),
-        cfg.runtime.binance.clone(),
+        boot.binance_cfg.clone(),
+        boot.config.runtime.binance.clone(),
     ));
 
     let params: serde_json::Value = serde_json::from_str(&args.params)?;

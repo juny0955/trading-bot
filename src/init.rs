@@ -5,5 +5,6 @@ pub fn setup() {
     tracing_subscriber::fmt()
         .with_target(false)
         .compact()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 }
