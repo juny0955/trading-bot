@@ -24,10 +24,11 @@ pub enum BinanceApiError {
 impl From<BinanceApiError> for OrderError {
     fn from(value: BinanceApiError) -> Self {
         match value {
-            BinanceApiError::Rejected { .. } => OrderError::InsufficientMargin,
-            BinanceApiError::Timeout | BinanceApiError::Connection(_) => {
-                OrderError::NotFound("connection failed".into())
-            }
+            // -2010, -2018 같은 증거금 코드만 InsufficientMargin으로
+            BinanceApiError::Rejected { code: -2010 | -2018 | -2019, .. } => Self::InsufficientMargin,
+            BinanceApiError::Rejected { code, msg } => Self::ExchangeRejected { code, msg },
+            BinanceApiError::Timeout => Self::Timeout,
+            BinanceApiError::Connection(s) => Self::ConnectionLost(s),
         }
     }
 }
@@ -55,8 +56,7 @@ impl BinanceOrderApi {
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
-            .build()
-            .unwrap();
+            .build()?;
 
         let executor = Arc::new(Self {
             api_key,
@@ -118,7 +118,7 @@ impl BinanceOrderApi {
         }
     }
 
-    pub(crate) async fn get_listen_key(&self) -> anyhow::Result<String> {
+    pub(crate) async fn get_listen_key(&self) -> Result<String> {
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
         let val = self
             .client
@@ -135,7 +135,7 @@ impl BinanceOrderApi {
             .ok_or_else(|| anyhow!("listenKey 없음"))
     }
 
-    pub(crate) async fn renew_listen_key(&self, listen_key: &str) -> anyhow::Result<()> {
+    pub(crate) async fn renew_listen_key(&self, listen_key: &str) -> Result<()> {
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
         self.client
             .put(&url)

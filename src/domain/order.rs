@@ -29,6 +29,32 @@ pub enum OrderStatus {
     Expired,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("invalid transition: {from:?} → {to:?}")]
+pub struct InvalidTransition {
+    pub from: OrderStatus,
+    pub to: OrderStatus,
+}
+
+impl OrderStatus {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Filled | Self::Cancelled | Self::Rejected | Self::Expired)
+    }
+
+    pub fn can_transition_to(self, next: OrderStatus) -> Result<(), InvalidTransition> {
+        use OrderStatus::*;
+        let ok = match (self, next) {
+            (New, PartiallyFilled | Filled | Cancelled | Rejected | Expired) => true,
+            (PartiallyFilled, PartiallyFilled | Filled | Cancelled | Expired) => true,
+            // terminal → terminal 은 거래소가 사후 정정하는 경우만 허용
+            (Filled, Cancelled) => true,           // 드물지만 가능 (정정)
+            _ if self == next => true,             // idempotent
+            _ => false,
+        };
+        if ok { Ok(()) } else { Err(InvalidTransition { from: self, to: next }) }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TimeInForce {
     #[default]
@@ -86,12 +112,20 @@ pub struct OrderRequest {
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrderError {
-    #[error("Order Not Found: {0}")]
+    #[error("주문 없음: {0}")]
     NotFound(String),
-    #[error("Insufficient Margin")]
+    #[error("증거금 부족")]
     InsufficientMargin,
-    #[error("Invalid Request: {0}")]
+    #[error("잘못된 요청: {0}")]
     InvalidRequest(String),
+    #[error("거래소 거부: code={code} msg={msg}")]
+    ExchangeRejected { code: i32, msg: String },
+    #[error("연결 실패: {0}")]
+    ConnectionLost(String),
+    #[error("타임아웃")]
+    Timeout,
+    #[error("내부 오류: {0:#}")]
+    Internal(#[source] anyhow::Error),
 }
 
 impl Order {
