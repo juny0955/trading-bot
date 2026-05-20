@@ -58,6 +58,27 @@ impl BinanceConfig {
         }
     }
 
+    pub fn order_ws_url(&self) -> &str {
+        match self.net {
+            BinanceNet::Mainnet => "wss://ws-fapi.binance.com/ws-fapi/v1",
+            BinanceNet::Testnet => "wss://testnet.binancefuture.com/ws-fapi/v1",
+        }
+    }
+
+    pub fn user_stream_base_url(&self) -> &str {
+        match self.net {
+            BinanceNet::Mainnet => "wss://fstream.binance.com/ws",
+            BinanceNet::Testnet => "wss://stream.binancefuture.com/ws",
+        }
+    }
+
+    pub fn rest_base_url(&self) -> &str {
+        match self.net {
+            BinanceNet::Mainnet => "https://fapi.binance.com",
+            BinanceNet::Testnet => "https://testnet.binancefuture.com",
+        }
+    }
+
     fn build_streams(&self, stream_type: StreamType) -> Vec<String> {
         self.symbols
             .iter()

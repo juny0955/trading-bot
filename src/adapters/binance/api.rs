@@ -1,3 +1,4 @@
+use crate::config::binance_config::BinanceConfig;
 use crate::domain::order::OrderError;
 use anyhow::anyhow;
 use reqwest::Client;
@@ -43,25 +44,12 @@ pub struct BinanceOrderApi {
 }
 
 impl BinanceOrderApi {
-    pub fn new(api_key: String, secret: String, testnet: bool) -> (Arc<Self>, Receiver<String>) {
+    pub fn new(
+        api_key: String,
+        secret: String,
+        cfg: &BinanceConfig,
+    ) -> (Arc<Self>, Receiver<String>) {
         let (ws_tx, ws_rx) = mpsc::channel(100);
-        let order_ws_url = if testnet {
-            "wss://testnet.binancefuture.com/ws-fapi/v1".to_string()
-        } else {
-            "wss://ws-fapi.binance.com/ws-fapi/v1".to_string()
-        };
-
-        let user_stream_base = if testnet {
-            "wss://stream.binancefuture.com/ws".to_string()
-        } else {
-            "wss://fstream.binance.com/ws".to_string()
-        };
-
-        let rest_base = if testnet {
-            "https://testnet.binancefuture.com".to_string()
-        } else {
-            "https://fapi.binance.com".to_string()
-        };
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
@@ -71,9 +59,9 @@ impl BinanceOrderApi {
         let executor = Arc::new(Self {
             api_key,
             secret,
-            order_ws_url,
-            user_stream_base,
-            rest_base,
+            order_ws_url: cfg.order_ws_url().to_string(),
+            user_stream_base: cfg.user_stream_base_url().to_string(),
+            rest_base: cfg.rest_base_url().to_string(),
             ws_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             client,
