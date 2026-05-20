@@ -125,7 +125,9 @@ async fn update_position(
         info!(side = ?p.side, qty = %p.qty, "포지션 갱신 (reduce)");
     } else {
         match p.side {
-            Some(cur) if cur == side => { p.qty += qty; }
+            Some(cur) if cur == side => {
+                p.qty += qty;
+            }
             Some(_) => {
                 warn!("reverse without reduce_only - strategy 점검 필요");
                 p.side = Some(side);

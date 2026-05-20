@@ -31,7 +31,10 @@ impl AccountEventHandler {
         let order = match self.repo.find_by_exchange_id(event.exchange_order_id).await {
             Ok(Some(o)) => o,
             Ok(None) => {
-                warn!(order_id = event.exchange_order_id, "ORDER_TRADE_UPDATE DB에 없음");
+                warn!(
+                    order_id = event.exchange_order_id,
+                    "ORDER_TRADE_UPDATE DB에 없음"
+                );
                 return;
             }
             Err(e) => {

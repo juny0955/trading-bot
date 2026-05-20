@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use crate::adapters::binance::api::BinanceOrderApi;
 use crate::adapters::binance::dto_account::BinanceOrderTradeUpdate;
-use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
+use crate::adapters::binance::ws::reconnect::{
+    ReconnectConfig, WsError, WsSession, run_with_reconnect,
+};
 use crate::application::order_execution_event::OrderExecutionEvent;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -26,12 +28,19 @@ struct UserStreamSession {
 
 #[async_trait]
 impl WsSession for UserStreamSession {
-    async fn run_once(&mut self, token: CancellationToken) -> anyhow::Result<()> {
-        let listen_key = self.api.get_listen_key().await?;
+    async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
+        let listen_key = self.api.get_listen_key().await.map_err(|e| {
+            if format!("{e}").contains("401") || format!("{e}").contains("403") {
+                WsError::fatal(e)
+            } else {
+                WsError::retryable(e)
+            }
+        })?;
         let url = format!("{}/{}", self.api.user_stream_base, listen_key);
         let (ws_stream, _) = connect_async(&url)
             .await
-            .inspect_err(|e| error!(error = %e, "User WS 연결 실패"))?;
+            .inspect_err(|e| error!(error = %e, "User WS 연결 실패"))
+            .map_err(WsError::retryable)?;
         info!(url = %url, "User WS 연결됨");
         let (mut write, mut read) = ws_stream.split();
 
@@ -47,8 +56,8 @@ impl WsSession for UserStreamSession {
                 }
                 _ = renew_interval.tick() => {
                     if let Err(e) = self.api.renew_listen_key(&listen_key).await {
-                          warn!(error = %e, "User WS listenKey 갱신 실패");
-                          return Err(anyhow!("listenKey 갱신 실패"));
+                          warn!(error = %e, "listenKey 갱신 실패");
+                          return Err(WsError::Retryable(e));
                     }
                     info!("User WS listenKey 갱신 성공");
                 }
@@ -71,13 +80,14 @@ impl WsSession for UserStreamSession {
                             }
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
-                            write.send(Message::Pong(payload)).await?;
+                            write.send(Message::Pong(payload)).await
+                            .map_err(WsError::retryable)?;
                         }
                         Ok(Some(Ok(Message::Close(_)))) => {
-                            return Err(anyhow!("User WS 서버 측 Close"));
+                            return Err(WsError::Retryable(anyhow!("서버 측 Close")));
                         }
-                        Ok(None) => return Err(anyhow!("User WS 스트림 종료")),
-                        Err(_) => return Err(anyhow!("User WS 타임아웃 60s")),
+                        Ok(None) => return Err(WsError::Retryable(anyhow!("스트림 종료"))),
+                        Err(_) => return Err(WsError::Retryable(anyhow!("타임아웃"))),
                         _ => {}
                     }
                 }
@@ -97,10 +107,7 @@ impl BinanceUserStreamHandler {
                 api: Arc::clone(&self.api),
                 tx,
             },
-            ReconnectConfig {
-                label: "User WS".to_string(),
-                reconnect_delay: Duration::from_secs(3),
-            },
+            ReconnectConfig::defaults("User WS"),
             token,
         )
         .await

@@ -1,5 +1,7 @@
 use crate::adapters::binance::api::BinanceOrderApi;
-use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
+use crate::adapters::binance::ws::reconnect::{
+    ReconnectConfig, WsError, WsSession, run_with_reconnect,
+};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -24,10 +26,11 @@ struct OrderStreamSession {
 
 #[async_trait]
 impl WsSession for OrderStreamSession {
-    async fn run_once(&mut self, token: CancellationToken) -> Result<()> {
+    async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
         let (ws_stream, _) = connect_async(&self.api.order_ws_url)
             .await
-            .inspect_err(|e| error!(error = %e, "Order WS 연결 실패"))?;
+            .inspect_err(|e| error!(error = %e, "Order WS 연결 실패"))
+            .map_err(WsError::retryable)?;
         info!(url = %self.api.order_ws_url, "Order WS 연결");
         let (mut write, mut read) = ws_stream.split();
 
@@ -39,7 +42,7 @@ impl WsSession for OrderStreamSession {
                     return Ok(());
                 }
                 msg = self.ws_rx.recv() => match msg {
-                    Some(text) => { write.send(Message::Text(text.into())).await?; }
+                    Some(text) => { write.send(Message::Text(text.into())).await.map_err(WsError::retryable)?; }
                     None => { info!("Order WS 채널 닫힘"); return Ok(()); }
                 },
                 msg = time::timeout(Duration::from_secs(30), read.next()) => {
@@ -52,11 +55,11 @@ impl WsSession for OrderStreamSession {
                             }
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
-                            write.send(Message::Pong(payload)).await?;
+                            write.send(Message::Pong(payload)).await.map_err(WsError::retryable)?;
                         }
-                        Ok(Some(Ok(Message::Close(_)))) => return Err(anyhow!("Order WS 서버 측 Close")),
-                        Ok(None) => return Err(anyhow!("Order WS 스트림 종료")),
-                        Err(_) => return Err(anyhow!("Order WS 타임아웃 30s")),
+                        Ok(Some(Ok(Message::Close(_)))) => return Err(WsError::retryable(anyhow!("서버 측 Close"))),
+                        Ok(None) => return Err(WsError::retryable(anyhow!("스트림 종료"))),
+                        Err(_) => return Err(WsError::retryable(anyhow!("타임아웃"))),
                         _ => {}
                     }
                 }
@@ -85,10 +88,7 @@ impl OrderWsLoop {
                 api: Arc::clone(&self.api),
                 ws_rx,
             },
-            ReconnectConfig {
-                label: "Order WS".to_string(),
-                reconnect_delay: Duration::from_secs(3),
-            },
+            ReconnectConfig::defaults("Order WS"),
             token,
         )
         .await;

@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crate::adapters::binance::ws::reconnect::{ReconnectConfig, WsSession, run_with_reconnect};
+use crate::adapters::binance::ws::reconnect::{
+    ReconnectConfig, WsError, WsSession, run_with_reconnect,
+};
 use crate::adapters::inbound::binance::dto::{StreamData, StreamEnvelope};
 use crate::config::BinanceRuntimeConfig;
 use crate::config::binance_config::BinanceConfig;
@@ -94,10 +96,7 @@ pub async fn subscribe_to_binance_futures_stream(
             stream_type: stream_type.into(),
             read_timeout: Duration::from_secs(runtime_cfg.read_timeout_sec),
         },
-        ReconnectConfig {
-            label,
-            reconnect_delay: Duration::from_secs(runtime_cfg.reconnect_delay_sec),
-        },
+        ReconnectConfig::defaults(label),
         token,
     )
     .await
@@ -112,7 +111,7 @@ struct BinanceStreamSession {
 
 #[async_trait]
 impl WsSession for BinanceStreamSession {
-    async fn run_once(&mut self, token: CancellationToken) -> Result<()> {
+    async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
         stream(
             &self.url,
             &self.stream_type,
@@ -121,6 +120,7 @@ impl WsSession for BinanceStreamSession {
             self.read_timeout,
         )
         .await
+        .map_err(WsError::retryable)
     }
 }
 

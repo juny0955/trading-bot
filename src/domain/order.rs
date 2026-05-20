@@ -38,7 +38,10 @@ pub struct InvalidTransition {
 
 impl OrderStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Filled | Self::Cancelled | Self::Rejected | Self::Expired)
+        matches!(
+            self,
+            Self::Filled | Self::Cancelled | Self::Rejected | Self::Expired
+        )
     }
 
     pub fn can_transition_to(self, next: OrderStatus) -> Result<(), InvalidTransition> {
@@ -47,11 +50,18 @@ impl OrderStatus {
             (New, PartiallyFilled | Filled | Cancelled | Rejected | Expired) => true,
             (PartiallyFilled, PartiallyFilled | Filled | Cancelled | Expired) => true,
             // terminal → terminal 은 거래소가 사후 정정하는 경우만 허용
-            (Filled, Cancelled) => true,           // 드물지만 가능 (정정)
-            _ if self == next => true,             // idempotent
+            (Filled, Cancelled) => true, // 드물지만 가능 (정정)
+            _ if self == next => true,   // idempotent
             _ => false,
         };
-        if ok { Ok(()) } else { Err(InvalidTransition { from: self, to: next }) }
+        if ok {
+            Ok(())
+        } else {
+            Err(InvalidTransition {
+                from: self,
+                to: next,
+            })
+        }
     }
 }
 

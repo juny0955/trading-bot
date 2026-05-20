@@ -12,20 +12,52 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 const BID_PRICE_COLS: [&str; 10] = [
-    "bid1_price","bid2_price","bid3_price","bid4_price","bid5_price",
-    "bid6_price","bid7_price","bid8_price","bid9_price","bid10_price",
+    "bid1_price",
+    "bid2_price",
+    "bid3_price",
+    "bid4_price",
+    "bid5_price",
+    "bid6_price",
+    "bid7_price",
+    "bid8_price",
+    "bid9_price",
+    "bid10_price",
 ];
 const BID_QTY_COLS: [&str; 10] = [
-    "bid1_qty","bid2_qty","bid3_qty","bid4_qty","bid5_qty",
-    "bid6_qty","bid7_qty","bid8_qty","bid9_qty","bid10_qty",
+    "bid1_qty",
+    "bid2_qty",
+    "bid3_qty",
+    "bid4_qty",
+    "bid5_qty",
+    "bid6_qty",
+    "bid7_qty",
+    "bid8_qty",
+    "bid9_qty",
+    "bid10_qty",
 ];
 const ASK_PRICE_COLS: [&str; 10] = [
-    "ask1_price","ask2_price","ask3_price","ask4_price","ask5_price",
-    "ask6_price","ask7_price","ask8_price","ask9_price","ask10_price",
+    "ask1_price",
+    "ask2_price",
+    "ask3_price",
+    "ask4_price",
+    "ask5_price",
+    "ask6_price",
+    "ask7_price",
+    "ask8_price",
+    "ask9_price",
+    "ask10_price",
 ];
 const ASK_QTY_COLS: [&str; 10] = [
-    "ask1_qty","ask2_qty","ask3_qty","ask4_qty","ask5_qty",
-    "ask6_qty","ask7_qty","ask8_qty","ask9_qty","ask10_qty",
+    "ask1_qty",
+    "ask2_qty",
+    "ask3_qty",
+    "ask4_qty",
+    "ask5_qty",
+    "ask6_qty",
+    "ask7_qty",
+    "ask8_qty",
+    "ask9_qty",
+    "ask10_qty",
 ];
 
 pub struct QuestDbSink {

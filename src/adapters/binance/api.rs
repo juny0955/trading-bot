@@ -25,7 +25,10 @@ impl From<BinanceApiError> for OrderError {
     fn from(value: BinanceApiError) -> Self {
         match value {
             // -2010, -2018 같은 증거금 코드만 InsufficientMargin으로
-            BinanceApiError::Rejected { code: -2010 | -2018 | -2019, .. } => Self::InsufficientMargin,
+            BinanceApiError::Rejected {
+                code: -2010 | -2018 | -2019,
+                ..
+            } => Self::InsufficientMargin,
             BinanceApiError::Rejected { code, msg } => Self::ExchangeRejected { code, msg },
             BinanceApiError::Timeout => Self::Timeout,
             BinanceApiError::Connection(s) => Self::ConnectionLost(s),
@@ -54,9 +57,7 @@ impl BinanceOrderApi {
         anyhow::ensure!(!secret.trim().is_empty(), "BINANCE_SECRET 비어있음");
         let (ws_tx, ws_rx) = mpsc::channel(100);
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
 
         let executor = Arc::new(Self {
             api_key,
