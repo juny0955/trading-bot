@@ -1,6 +1,6 @@
 use crate::config::binance_config::BinanceConfig;
 use crate::domain::order::OrderError;
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -48,7 +48,9 @@ impl BinanceOrderApi {
         api_key: String,
         secret: String,
         cfg: &BinanceConfig,
-    ) -> (Arc<Self>, Receiver<String>) {
+    ) -> Result<(Arc<Self>, Receiver<String>)> {
+        anyhow::ensure!(!api_key.trim().is_empty(), "BINANCE_API_KEY 비어있음");
+        anyhow::ensure!(!secret.trim().is_empty(), "BINANCE_SECRET 비어있음");
         let (ws_tx, ws_rx) = mpsc::channel(100);
 
         let client = Client::builder()
@@ -66,7 +68,7 @@ impl BinanceOrderApi {
             pending: Arc::new(Mutex::new(HashMap::new())),
             client,
         });
-        (executor, ws_rx)
+        Ok((executor, ws_rx))
     }
 
     pub(crate) async fn send_and_wait(

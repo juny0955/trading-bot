@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
     let api_key = std::env::var("BINANCE_API_KEY").expect("BINANCE_API_KEY 없음");
     let secret = std::env::var("BINANCE_SECRET").expect("BINANCE_SECRET 없음");
 
-    let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &cfg.binance);
+    let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &cfg.binance)?;
 
     let repo = Arc::new(PgOrderRepository::new(pool));
     let executor = Arc::new(BinanceOrderExecutor::new(api.clone()));
