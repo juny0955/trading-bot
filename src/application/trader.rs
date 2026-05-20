@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct Trader {
     order_svc: Arc<dyn OrderService>,
@@ -121,17 +121,32 @@ async fn update_position(
             *p = Position::default();
         }
     } else {
-        p.side = Some(side);
-        p.qty = qty;
+        match p.side {
+            Some(cur) if cur == side => { p.qty += qty; }
+            Some(_) => {
+                warn!("reverse without reduce_only - strategy 점검 필요");
+                p.side = Some(side);
+                p.qty = qty;
+            }
+            None => {
+                p.side = Some(side);
+                p.qty = qty;
+            }
+        }
         // entry_price: 실제 체결가는 AccountEventHandler에서 확정
     }
 }
 
 async fn make_ctx(position: &Arc<Mutex<Position>>, now_ns: i64) -> Context {
+    let position_snapshot = {
+        let guard = position.lock().await;
+        guard.clone()
+    };
+
     Context {
         now_ns,
         equity: Decimal::ZERO,
-        position: position.lock().await.clone(),
+        position: position_snapshot,
     }
 }
 
