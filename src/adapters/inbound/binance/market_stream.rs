@@ -10,7 +10,6 @@ use crate::domain::event::MarketDataEvent;
 use crate::ports::live_market_feed::LiveMarketFeed;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use futures_util::future::join_all;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
@@ -20,7 +19,7 @@ use tokio_tungstenite::{
     tungstenite::{Message, client::IntoClientRequest},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub struct BinanceLiveFeed {
     cfg: BinanceConfig,
@@ -37,13 +36,12 @@ impl BinanceLiveFeed {
 impl LiveMarketFeed for BinanceLiveFeed {
     async fn run(self: Box<Self>, market_tx: Sender<MarketDataEvent>, token: CancellationToken) {
         let (stream_tx, mut stream_rx) = mpsc::channel::<StreamData>(100);
-        let mut handles = Vec::new();
 
         let public_url = self.cfg.public_ws_url();
         let public_runtime = self.runtime_cfg.clone();
         let public_tx = stream_tx.clone();
         let public_token = token.clone();
-        handles.push(tokio::spawn(async move {
+        let mut public_h = tokio::spawn(async move {
             subscribe_to_binance_futures_stream(
                 public_url,
                 "Public",
@@ -52,12 +50,12 @@ impl LiveMarketFeed for BinanceLiveFeed {
                 public_token,
             )
             .await
-        }));
+        });
 
         let market_url = self.cfg.market_ws_url();
         let market_runtime = self.runtime_cfg;
         let market_token = token.clone();
-        handles.push(tokio::spawn(async move {
+        let mut market_h = tokio::spawn(async move {
             subscribe_to_binance_futures_stream(
                 market_url,
                 "Market",
@@ -66,18 +64,30 @@ impl LiveMarketFeed for BinanceLiveFeed {
                 market_token,
             )
             .await
-        }));
+        });
 
-        handles.push(tokio::spawn(async move {
+        let mut forward_h = tokio::spawn(async move {
             while let Some(stream) = stream_rx.recv().await {
                 if let Err(e) = market_tx.send(stream.into()).await {
                     warn!(error = %e, "QuestDB Tx 채널 닫힘");
                     return;
                 }
             }
-        }));
+        });
 
-        let _ = join_all(handles).await;
+        let (task, result) = tokio::select! {
+            r = &mut public_h => ("Public", r),
+            r = &mut market_h => ("Market", r),
+            r = &mut forward_h => ("Forward", r),
+        };
+        if let Err(e) = result {
+            error!(task = task, error = ?e, "BinanceLiveFeed Task 비정상 종료");
+        }
+
+        token.cancel();
+        public_h.abort();
+        market_h.abort();
+        forward_h.abort();
     }
 }
 
