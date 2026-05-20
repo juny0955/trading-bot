@@ -1,6 +1,8 @@
 use crate::domain::order::{Order, OrderError, OrderRequest};
 use crate::ports::order_executor::OrderExecutor;
 use crate::ports::order_repository::OrderRepository;
+use crate::ports::order_service::OrderService;
+use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -13,14 +15,17 @@ impl LiveOrderService {
     pub fn new(executor: Arc<dyn OrderExecutor>, repo: Arc<dyn OrderRepository>) -> Self {
         Self { executor, repo }
     }
+}
 
-    pub async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
+#[async_trait]
+impl OrderService for LiveOrderService {
+    async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
         let order = self.executor.submit(request).await?;
         self.repo.upsert_order(&order).await?;
         Ok(order)
     }
 
-    pub async fn cancel(&self, order_id: Uuid) -> Result<Order, OrderError> {
+    async fn cancel(&self, order_id: Uuid) -> Result<Order, OrderError> {
         let order = self
             .repo
             .find_by_id(order_id)
@@ -32,7 +37,7 @@ impl LiveOrderService {
         Ok(updated)
     }
 
-    pub async fn sync_open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    async fn sync_open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
         let orders = self.executor.open_orders(symbol).await?;
         Ok(orders)
     }

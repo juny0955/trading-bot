@@ -16,7 +16,7 @@ use trading_bot::adapters::outbound::postgres::order_repo::PgOrderRepository;
 use trading_bot::adapters::outbound::postgres::pool::init_db;
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::live_order_service::LiveOrderService;
-use trading_bot::application::trader;
+use trading_bot::application::trader::Trader;
 use trading_bot::config::binance_config::BinanceNet;
 use trading_bot::domain::backtest::Position;
 use trading_bot::domain::order::Fill;
@@ -24,6 +24,8 @@ use trading_bot::domain::strategies::create_strategy;
 use trading_bot::init;
 use trading_bot::ports::config_repository::ConfigRepository;
 use trading_bot::ports::fill_sink::FillSink;
+use trading_bot::ports::order_service::OrderService;
+use trading_bot::ports::trading_use_case::TradingUseCase;
 
 #[derive(Parser)]
 #[command(name = "trader")]
@@ -66,7 +68,8 @@ async fn main() -> Result<()> {
 
     let repo = Arc::new(PgOrderRepository::new(pool));
     let executor = Arc::new(BinanceOrderExecutor::new(api.clone()));
-    let order_svc = Arc::new(LiveOrderService::new(executor, repo.clone()));
+    let order_svc: Arc<dyn OrderService> = Arc::new(LiveOrderService::new(executor, repo.clone()));
+    let trader = Box::new(Trader::new(order_svc));
 
     let feed = Box::new(BinanceLiveFeed::new(
         cfg.binance.clone(),
@@ -101,7 +104,7 @@ async fn main() -> Result<()> {
         tokio::spawn({
             let token = token.clone();
             async move {
-                if let Err(e) = trader::run(feed, strategy, order_svc, position, token).await {
+                if let Err(e) = trader.run(feed, strategy, position, token).await {
                     error!("trader 종료: {e}");
                 }
             }

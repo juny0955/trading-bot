@@ -1,11 +1,13 @@
-use crate::application::live_order_service::LiveOrderService;
 use crate::domain::backtest::{Bar, DepthSnapshot, Position};
 use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
 use crate::domain::order::OrderSide;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
 use crate::ports::live_market_feed::LiveMarketFeed;
+use crate::ports::order_service::OrderService;
+use crate::ports::trading_use_case::TradingUseCase;
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -13,46 +15,59 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-pub async fn run(
-    feed: Box<dyn LiveMarketFeed>,
-    mut strategy: Box<dyn Strategy>,
-    order_svc: Arc<LiveOrderService>,
-    position: Arc<Mutex<Position>>,
-    token: CancellationToken,
-) -> Result<()> {
-    let (market_tx, mut market_rx) = mpsc::channel::<MarketDataEvent>(256);
+pub struct Trader {
+    order_svc: Arc<dyn OrderService>,
+}
 
-    let feed_token = token.clone();
-    tokio::spawn(async move {
-        feed.run(market_tx, feed_token).await;
-    });
+impl Trader {
+    pub fn new(order_svc: Arc<dyn OrderService>) -> Self {
+        Self { order_svc }
+    }
+}
 
-    let ctx = make_ctx(&position, now_ns()).await;
-    let cmds = strategy.on_start(&ctx);
-    dispatch(&order_svc, &position, cmds).await;
+#[async_trait]
+impl TradingUseCase for Trader {
+    async fn run(
+        self: Box<Self>,
+        feed: Box<dyn LiveMarketFeed>,
+        mut strategy: Box<dyn Strategy>,
+        position: Arc<Mutex<Position>>,
+        token: CancellationToken,
+    ) -> Result<()> {
+        let (market_tx, mut market_rx) = mpsc::channel::<MarketDataEvent>(256);
 
-    loop {
-        tokio::select! {
-            _ = token.cancelled() => break,
-            event = market_rx.recv() => match event {
-                Some(e) => {
-                    let ctx = make_ctx(&position, now_ns()).await;
-                    let cmds = on_event(&mut *strategy, e, &ctx);
-                    dispatch(&order_svc, &position, cmds).await;
-                }
-                None => {
-                    error!("market feed 채널 닫힘");
-                    break;
+        let feed_token = token.clone();
+        tokio::spawn(async move {
+            feed.run(market_tx, feed_token).await;
+        });
+
+        let ctx = make_ctx(&position, now_ns()).await;
+        let cmds = strategy.on_start(&ctx);
+        dispatch(&self.order_svc, &position, cmds).await;
+
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => break,
+                event = market_rx.recv() => match event {
+                    Some(e) => {
+                        let ctx = make_ctx(&position, now_ns()).await;
+                        let cmds = on_event(&mut *strategy, e, &ctx);
+                        dispatch(&self.order_svc, &position, cmds).await;
+                    }
+                    None => {
+                        error!("market feed 채널 닫힘");
+                        break;
+                    }
                 }
             }
         }
+
+        let ctx = make_ctx(&position, now_ns()).await;
+        let cmds = strategy.on_finish(&ctx);
+        dispatch(&self.order_svc, &position, cmds).await;
+
+        Ok(())
     }
-
-    let ctx = make_ctx(&position, now_ns()).await;
-    let cmds = strategy.on_finish(&ctx);
-    dispatch(&order_svc, &position, cmds).await;
-
-    Ok(())
 }
 
 fn on_event(
@@ -70,7 +85,7 @@ fn on_event(
 }
 
 async fn dispatch(
-    svc: &Arc<LiveOrderService>,
+    svc: &Arc<dyn OrderService>,
     position: &Arc<Mutex<Position>>,
     cmds: Vec<StrategyCommand>,
 ) {
