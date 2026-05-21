@@ -64,7 +64,8 @@ impl WsSession for UserStreamSession {
                 msg = time::timeout(Duration::from_secs(240), read.next()) => {
                     match msg {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                            if let Ok(val) = serde_json::from_str::<Value>(&text)
+                            && val["e"].as_str() == Some("ORDER_TRADE_UPDATE") {
                                 match BinanceOrderTradeUpdate::from_value(&val) {
                                     Ok(dto) => {
                                         let event = dto.into_execution_event();

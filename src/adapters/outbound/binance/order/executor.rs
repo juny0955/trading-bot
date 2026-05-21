@@ -57,7 +57,10 @@ impl OrderExecutor for BinanceOrderExecutor {
 
         match request.order_type {
             OrderType::Limit | OrderType::StopLimit => {
-                params.insert("timeInForce", json!(time_in_force_str(&request.time_in_force)));
+                params.insert(
+                    "timeInForce",
+                    json!(time_in_force_str(&request.time_in_force)),
+                );
             }
             _ => {}
         }
