@@ -1,5 +1,5 @@
-use crate::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
 use crate::adapters::outbound::postgres::pool::init_db;
+use crate::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
 use crate::config::AppConfig;
 use crate::config::binance_config::BinanceConfig;
 use crate::init::setup;

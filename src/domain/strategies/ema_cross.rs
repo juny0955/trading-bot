@@ -1,5 +1,5 @@
-use crate::domain::backtest::{Bar, Position};
-use crate::domain::order::{OrderRequest, OrderSide, OrderType};
+use crate::domain::backtest::Bar;
+use crate::domain::order::OrderSide;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
 use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
@@ -59,40 +59,6 @@ impl EmaCross {
 
         anyhow::ensure!(qty > Decimal::ZERO, "qty must be positive");
         Ok(Self::new(p.fast, p.slow, qty))
-    }
-
-    fn close_and_open(
-        position: &Position,
-        symbol: &str,
-        new_side: OrderSide,
-        qty: Decimal,
-    ) -> Vec<StrategyCommand> {
-        let mut cmds = Vec::new();
-        if let Some(cur) = position.side {
-            let close_side = if cur == OrderSide::Buy {
-                OrderSide::Sell
-            } else {
-                OrderSide::Buy
-            };
-            cmds.push(StrategyCommand::SubmitOrder(OrderRequest {
-                symbol: symbol.into(),
-                order_type: OrderType::Market,
-                side: close_side,
-                qty: position.qty,
-                reduce_only: true,
-                ..Default::default()
-            }));
-        }
-
-        cmds.push(StrategyCommand::SubmitOrder(OrderRequest {
-            symbol: symbol.into(),
-            order_type: OrderType::Market,
-            side: new_side,
-            qty,
-            ..Default::default()
-        }));
-
-        cmds
     }
 }
 
