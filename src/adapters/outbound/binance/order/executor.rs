@@ -49,11 +49,29 @@ impl OrderExecutor for BinanceOrderExecutor {
         params.insert("recvWindow", json!(5000u64));
         params.insert("side", json!(side));
 
+        if request.reduce_only {
+            params.insert("reduceOnly", json!("true"));
+        }
+
         if let Some(sp) = request.stop_price {
             params.insert("stopPrice", json!(sp.to_string()));
         }
 
         params.insert("symbol", json!(request.symbol));
+
+        if request.post_only {
+            params.insert("timeInForce", json!("GTX"));
+        } else {
+            match request.order_type {
+                OrderType::Limit | OrderType::StopLimit => {
+                    params.insert(
+                        "timeInForce",
+                        json!(time_in_force_str(&request.time_in_force)),
+                    );
+                }
+                _ => {}
+            }
+        }
 
         match request.order_type {
             OrderType::Limit | OrderType::StopLimit => {
