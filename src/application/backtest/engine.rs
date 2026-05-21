@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use std::sync::Arc;
 use tracing::info;
 
+#[derive(Clone)]
 pub struct BacktestConfig {
     pub symbol: String,
     pub from_ns: i64,
@@ -35,21 +36,16 @@ pub struct BacktestResult {
     pub equity_curve: Vec<EquityPoint>,
 }
 
-pub async fn run(
-    src: &dyn MarketDataSource,
-    cfg: BacktestConfig,
-    strategy: &mut dyn Strategy,
-) -> Result<BacktestResult> {
-    let symbol_ref = &cfg.symbol;
+pub async fn fetch_events(src: &dyn MarketDataSource, cfg: &BacktestConfig) -> Result<Vec<Event>> {
     let (bars, depths) = tokio::join!(
         src.fetch_bars(BarQuery {
-            symbol: symbol_ref.clone(),
+            symbol: cfg.symbol.clone(),
             from_ns: cfg.from_ns,
             to_ns: cfg.to_ns,
             interval: cfg.bar_interval,
         }),
         src.fetch_depth_snapshots(DepthQuery {
-            symbol: symbol_ref.clone(),
+            symbol: cfg.symbol.clone(),
             from_ns: cfg.from_ns,
             to_ns: cfg.to_ns,
             every: cfg.depth_every,
@@ -58,15 +54,21 @@ pub async fn run(
     let bars = bars?;
     let depths = depths?;
     info!(bars = bars.len(), depths = depths.len(), "fetched");
+    Ok(merge_events(bars, depths))
+}
 
-    let events = merge_events(bars, depths);
+async fn run_inner(
+    events: &[Event],
+    cfg: &BacktestConfig,
+    strategy: &mut dyn Strategy,
+) -> BacktestResult {
     let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
 
     if events.is_empty() {
-        return Ok(BacktestResult {
+        return BacktestResult {
             portfolio: executor.snapshot(),
             equity_curve: Vec::new(),
-        });
+        };
     }
 
     let mut equity_curve = Vec::with_capacity(events.len());
@@ -79,7 +81,7 @@ pub async fn run(
         dispatch(&executor, cmds).await;
     }
 
-    for ev in &events {
+    for ev in events {
         let ts = ev.ts_ns();
         let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Buy);
         let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Sell);
@@ -113,11 +115,10 @@ pub async fn run(
             OrderSide::Buy => OrderSide::Sell,
             OrderSide::Sell => OrderSide::Buy,
         };
-
         let qty = executor.position().qty;
         let _ = executor
             .submit(OrderRequest {
-                symbol: symbol_ref.clone(),
+                symbol: cfg.symbol.clone(),
                 order_type: OrderType::Market,
                 side: close_side,
                 qty,
@@ -139,10 +140,27 @@ pub async fn run(
         dispatch(&executor, cmds).await;
     }
 
-    Ok(BacktestResult {
+    BacktestResult {
         portfolio: executor.snapshot(),
         equity_curve,
-    })
+    }
+}
+
+pub async fn run(
+    src: &dyn MarketDataSource,
+    cfg: BacktestConfig,
+    strategy: &mut dyn Strategy,
+) -> Result<BacktestResult> {
+    let events = fetch_events(src, &cfg).await?;
+    Ok(run_inner(&events, &cfg, strategy).await)
+}
+
+pub async fn run_on_events(
+    events: Arc<Vec<Event>>,
+    cfg: BacktestConfig,
+    mut strategy: Box<dyn Strategy>,
+) -> BacktestResult {
+    run_inner(&events, &cfg, strategy.as_mut()).await
 }
 
 fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Context {
