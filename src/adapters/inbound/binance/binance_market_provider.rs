@@ -145,6 +145,7 @@ async fn stream(
     let (ws_stream, _) = connect_async(request)
         .await
         .context(format!("Binance {stream_type} 연결 실패"))?;
+    info!(url = %url, "Binance {stream_type} WS 연결");
     let (mut write, mut read) = ws_stream.split();
 
     loop {
