@@ -78,6 +78,7 @@ pub struct Order {
     pub id: Uuid,
     pub client_order_id: String,
     pub exchange_order_id: Option<i64>,
+    pub strategy_instance_id: i64,
     pub symbol: String,
     pub order_type: OrderType,
     pub side: OrderSide,
@@ -97,6 +98,7 @@ pub struct Order {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill {
     pub order_id: Uuid,
+    pub strategy_instance_id: i64,
     pub symbol: String,
     pub side: OrderSide,
     pub qty: Decimal,
@@ -108,6 +110,7 @@ pub struct Fill {
 
 #[derive(Debug, Clone, Default)]
 pub struct OrderRequest {
+    pub strategy_instance_id: i64,
     pub symbol: String,
     pub order_type: OrderType,
     pub side: OrderSide,
@@ -118,6 +121,18 @@ pub struct OrderRequest {
     pub time_in_force: TimeInForce,
     pub reduce_only: bool,
     pub post_only: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExchangeOpenOrder {
+    pub exchange_order_id: i64,
+    pub client_order_id: String,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub orig_qty: Decimal,
+    pub executed_qty: Decimal,
+    pub price: Option<Decimal>,
+    pub status: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -148,6 +163,7 @@ impl Order {
             id,
             client_order_id,
             exchange_order_id: None,
+            strategy_instance_id: req.strategy_instance_id,
             symbol: req.symbol,
             order_type: req.order_type,
             side: req.side,
@@ -163,5 +179,24 @@ impl Order {
             created_at: now,
             updated_at: now,
         }
+    }
+}
+
+impl TryFrom<&Order> for ExchangeOpenOrder {
+    type Error = OrderError;
+
+    fn try_from(o: &Order) -> Result<Self, Self::Error> {
+        Ok(Self {
+            exchange_order_id: o
+                .exchange_order_id
+                .ok_or_else(|| OrderError::InvalidRequest("exchange_order_id 없음".into()))?,
+            client_order_id: o.client_order_id.clone(),
+            symbol: o.symbol.clone(),
+            side: o.side,
+            orig_qty: o.qty,
+            executed_qty: o.filled_qty,
+            price: o.price,
+            status: format!("{:?}", o.status),
+        })
     }
 }

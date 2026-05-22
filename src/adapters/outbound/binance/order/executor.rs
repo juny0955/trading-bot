@@ -1,7 +1,8 @@
 use crate::adapters::binance::api::BinanceOrderApi;
 use crate::adapters::binance::signing;
 use crate::domain::order::{
-    Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType, TimeInForce,
+    ExchangeOpenOrder, Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType,
+    TimeInForce,
 };
 use crate::ports::order_executor::OrderExecutor;
 use async_trait::async_trait;
@@ -71,16 +72,6 @@ impl OrderExecutor for BinanceOrderExecutor {
                 }
                 _ => {}
             }
-        }
-
-        match request.order_type {
-            OrderType::Limit | OrderType::StopLimit => {
-                params.insert(
-                    "timeInForce",
-                    json!(time_in_force_str(&request.time_in_force)),
-                );
-            }
-            _ => {}
         }
 
         params.insert("timestamp", json!(ts));
@@ -159,7 +150,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         Ok(updated)
     }
 
-    async fn open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    async fn open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
         let id = Uuid::now_v7().to_string();
         let ts = signing::timestamp_ms();
 
@@ -174,45 +165,13 @@ impl OrderExecutor for BinanceOrderExecutor {
         let req = json!({ "id": id, "method": "openOrders.status", "params": params });
         let result = self.api.send_and_wait(id, req).await?;
 
-        Ok(result
-            .as_array()
-            .unwrap_or(&vec![])
+        let Some(orders) = result.as_array() else {
+            return Ok(Vec::new());
+        };
+
+        Ok(orders
             .iter()
-            .filter_map(|o| {
-                let exchange_id = o["orderId"].as_i64()?;
-                let side = match o["side"].as_str()? {
-                    "BUY" => OrderSide::Buy,
-                    "SELL" => OrderSide::Sell,
-                    _ => return None,
-                };
-                Some(Order {
-                    id: Uuid::nil(),
-                    client_order_id: o["clientOrderId"].as_str().unwrap_or("").to_string(),
-                    exchange_order_id: Some(exchange_id),
-                    symbol: symbol.into(),
-                    order_type: OrderType::Market,
-                    side,
-                    status: OrderStatus::New,
-                    qty: o["origQty"]
-                        .as_str()
-                        .unwrap_or("0")
-                        .parse()
-                        .unwrap_or_default(),
-                    price: None,
-                    stop_price: None,
-                    filled_qty: o["executedQty"]
-                        .as_str()
-                        .unwrap_or("0")
-                        .parse()
-                        .unwrap_or_default(),
-                    avg_fill_price: None,
-                    time_in_force: TimeInForce::Gtc,
-                    reduce_only: false,
-                    post_only: false,
-                    created_at: Utc::now(),
-                    updated_at: Utc::now(),
-                })
-            })
+            .filter_map(|o| parse_open_order(o, symbol))
             .collect())
     }
 }
@@ -240,4 +199,29 @@ fn value_to_str(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         other => other.to_string(),
     }
+}
+
+fn parse_open_order(o: &Value, symbol: &str) -> Option<ExchangeOpenOrder> {
+    Some(ExchangeOpenOrder {
+        exchange_order_id: o["orderId"].as_i64()?,
+        client_order_id: o["clientOrderId"].as_str().unwrap_or("").to_string(),
+        symbol: symbol.to_string(),
+        side: match o["side"].as_str()? {
+            "BUY" => OrderSide::Buy,
+            "SELL" => OrderSide::Sell,
+            _ => return None,
+        },
+        orig_qty: o["origQty"]
+            .as_str()
+            .unwrap_or("0")
+            .parse()
+            .unwrap_or_default(),
+        executed_qty: o["executedQty"]
+            .as_str()
+            .unwrap_or("0")
+            .parse()
+            .unwrap_or_default(),
+        price: o["price"].as_str().and_then(|v| v.parse().ok()),
+        status: o["status"].as_str().unwrap_or("UNKNOWN").to_string(),
+    })
 }

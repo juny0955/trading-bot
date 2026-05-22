@@ -46,6 +46,7 @@ impl AccountEventHandler {
         if let Some(fd) = event.fill {
             let fill = Fill {
                 order_id: order.id,
+                strategy_instance_id: order.strategy_instance_id,
                 symbol: order.symbol.clone(),
                 side: fd.side,
                 qty: fd.qty,

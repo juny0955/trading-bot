@@ -124,6 +124,7 @@ impl Portfolio {
     ) -> Fill {
         Fill {
             order_id: order.id,
+            strategy_instance_id: order.strategy_instance_id,
             symbol: order.symbol.clone(),
             side: order.side,
             qty,

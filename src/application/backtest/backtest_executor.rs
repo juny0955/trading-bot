@@ -1,7 +1,7 @@
 use crate::application::backtest::portfolio::{ClosedTrade, Portfolio};
 use crate::domain::backtest::Position;
 use crate::domain::order::{
-    Fill, Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType,
+    ExchangeOpenOrder, Fill, Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType,
 };
 use crate::ports::order_executor::OrderExecutor;
 use async_trait::async_trait;
@@ -20,6 +20,7 @@ struct BacktestState {
     orders: HashMap<Uuid, Order>,
     pending: VecDeque<Uuid>,
     fills_log: Vec<Fill>,
+    next_exchange_order_id: i64,
 }
 
 #[derive(Clone)]
@@ -38,6 +39,7 @@ impl BacktestOrderExecutor {
                 orders: HashMap::new(),
                 pending: VecDeque::new(),
                 fills_log: Vec::new(),
+                next_exchange_order_id: 0,
             }),
         }
     }
@@ -50,6 +52,7 @@ impl BacktestOrderExecutor {
             orders,
             pending,
             fills_log,
+            next_exchange_order_id: _,
         } = &mut *st_guard;
 
         if pending.is_empty() {
@@ -113,8 +116,10 @@ impl OrderExecutor for BacktestOrderExecutor {
                 request.order_type
             )));
         }
-        let order = Order::new_from_request(request);
+        let mut order = Order::new_from_request(request);
         let mut st = self.state.lock().unwrap();
+        st.next_exchange_order_id += 1;
+        order.exchange_order_id = Some(st.next_exchange_order_id);
         st.orders.insert(order.id, order.clone());
         st.pending.push_back(order.id);
         Ok(order)
@@ -148,14 +153,13 @@ impl OrderExecutor for BacktestOrderExecutor {
             .ok_or(OrderError::NotFound(order.id.to_string()))
     }
 
-    async fn open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    async fn open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
         let st = self.state.lock().unwrap();
-        Ok(st
-            .orders
+        st.orders
             .values()
             .filter(|o| o.symbol == symbol && o.status == OrderStatus::New)
-            .cloned()
-            .collect())
+            .map(ExchangeOpenOrder::try_from)
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 

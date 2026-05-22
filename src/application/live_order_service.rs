@@ -1,4 +1,4 @@
-use crate::domain::order::{Order, OrderError, OrderRequest};
+use crate::domain::order::{ExchangeOpenOrder, Order, OrderError, OrderRequest};
 use crate::ports::order_executor::OrderExecutor;
 use crate::ports::order_repository::OrderRepository;
 use crate::ports::order_service::OrderService;
@@ -37,7 +37,7 @@ impl OrderService for LiveOrderService {
         Ok(updated)
     }
 
-    async fn sync_open_orders(&self, symbol: &str) -> Result<Vec<Order>, OrderError> {
+    async fn sync_open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
         let orders = self.executor.open_orders(symbol).await?;
         Ok(orders)
     }

@@ -13,6 +13,7 @@ struct DbOrder {
     id: Uuid,
     client_order_id: String,
     exchange_order_id: Option<i64>,
+    strategy_instance_id: i64,
     symbol: String,
     order_type: OrderType,
     side: OrderSide,
@@ -35,6 +36,7 @@ impl From<DbOrder> for Order {
             id: db.id,
             client_order_id: db.client_order_id,
             exchange_order_id: db.exchange_order_id,
+            strategy_instance_id: db.strategy_instance_id,
             symbol: db.symbol,
             order_type: db.order_type,
             side: db.side,
@@ -56,6 +58,7 @@ impl From<DbOrder> for Order {
 #[derive(sqlx::FromRow)]
 struct DbFill {
     order_id: Uuid,
+    strategy_instance_id: i64,
     symbol: String,
     side: OrderSide,
     qty: Decimal,
@@ -69,6 +72,7 @@ impl From<DbFill> for Fill {
     fn from(db: DbFill) -> Self {
         Self {
             order_id: db.order_id,
+            strategy_instance_id: db.strategy_instance_id,
             symbol: db.symbol,
             side: db.side,
             qty: db.qty,
@@ -121,12 +125,12 @@ impl PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO orders (
-                id, client_order_id, exchange_order_id, symbol,
-                order_type, side, status, qty, price, stop_price,
+                id, client_order_id, exchange_order_id, strategy_instance_id,
+                symbol, order_type, side, status, qty, price, stop_price,
                 filled_qty, avg_fill_price, time_in_force,
                 reduce_only, post_only, created_at, updated_at
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
             ON CONFLICT (id) DO UPDATE SET
                 exchange_order_id = EXCLUDED.exchange_order_id,
                 status            = EXCLUDED.status,
@@ -138,6 +142,7 @@ impl PostgresOrderRepository {
         .bind(order.id)
         .bind(&order.client_order_id)
         .bind(order.exchange_order_id)
+        .bind(order.strategy_instance_id)
         .bind(&order.symbol)
         .bind(order.order_type)
         .bind(order.side)
@@ -161,12 +166,13 @@ impl PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO fills (
-                order_id, symbol, side, qty, price, fee, fee_asset, filled_at
+                order_id, strategy_instance_id, symbol, side, qty, price, fee, fee_asset, filled_at
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             "#,
         )
         .bind(fill.order_id)
+        .bind(fill.strategy_instance_id)
         .bind(&fill.symbol)
         .bind(fill.side)
         .bind(fill.qty)
