@@ -71,6 +71,15 @@ pub trait Strategy: Send {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct StrategyInstance {
+    pub id: i64,
+    pub strategy_type: String,
+    pub name: String,
+    pub params: Value,
+    pub symbols: Vec<String>,
+}
+
 pub fn create_strategy(name: &str, params: &Value) -> anyhow::Result<Box<dyn Strategy>> {
     match name {
         "ema_cross" => Ok(Box::new(EmaCross::from_params(params)?)),
