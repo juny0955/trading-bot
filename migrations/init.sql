@@ -113,3 +113,13 @@ CREATE TABLE IF NOT EXISTS positions
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (strategy_instance_id, symbol)
 );
+
+-- orphan_orders: 거래소에는 존재하지만 로컬 DB에 매핑되지 않은 주문 추적
+CREATE TABLE IF NOT EXISTS orphan_orders
+(
+    exchange_order_id BIGINT PRIMARY KEY,
+    client_order_id   VARCHAR(36),
+    symbol            VARCHAR(20),
+    detected_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    raw               JSONB       NOT NULL
+);
