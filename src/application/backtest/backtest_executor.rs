@@ -291,6 +291,19 @@ impl OrderExecutor for BacktestOrderExecutor {
             .map(ExchangeOpenOrder::try_from)
             .collect::<Result<Vec<_>, _>>()
     }
+
+    async fn query_by_client_id(
+        &self,
+        symbol: &str,
+        client_order_id: &str,
+    ) -> Result<Order, OrderError> {
+        let st = self.state().map_err(OrderError::from)?;
+        st.orders
+            .values()
+            .find(|o| o.symbol == symbol && o.client_order_id == client_order_id)
+            .cloned()
+            .ok_or_else(|| OrderError::NotFound(client_order_id.to_string()))
+    }
 }
 
 #[cfg(test)]

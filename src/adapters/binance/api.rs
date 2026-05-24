@@ -65,7 +65,7 @@ pub struct BinanceOrderApi {
     pub(crate) rest_base: String,
     pub(crate) ws_tx: Sender<String>,
     pub(crate) pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
-    client: Client,
+    pub(crate) client: Client,
 }
 
 impl BinanceOrderApi {

@@ -1,5 +1,6 @@
 use crate::domain::order::{Fill, Order, OrderSide, OrderStatus, OrderType, TimeInForce};
 use crate::ports::order_repository::{OrderRepository, RepositoryError};
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -125,6 +126,10 @@ impl OrderRepository for PostgresOrderRepository {
     ) -> Result<Option<Order>, RepositoryError> {
         Self::find_by_exchange_id(self, exchange_id).await
     }
+
+    async fn find_by_status(&self, status: OrderStatus) -> Result<Vec<Order>, RepositoryError> {
+        Self::find_by_status(self, status).await
+    }
 }
 
 impl PostgresOrderRepository {
@@ -239,6 +244,21 @@ impl PostgresOrderRepository {
                 .fetch_optional(&self.pool)
                 .await?
                 .map(Into::into),
+        )
+    }
+
+    pub async fn find_by_status(
+        &self,
+        status: OrderStatus,
+    ) -> Result<Vec<Order>, RepositoryError> {
+        Ok(
+            sqlx::query_as::<_, DbOrder>(r#"SELECT * FROM orders WHERE status = $1"#)
+                .bind(status)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         )
     }
 }

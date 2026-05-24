@@ -7,6 +7,7 @@ use crate::domain::order::{
 use crate::ports::order_executor::OrderExecutor;
 use async_trait::async_trait;
 use chrono::Utc;
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -134,6 +135,22 @@ impl OrderExecutor for BinanceOrderExecutor {
             .filter_map(|o| parse_open_order(o, symbol))
             .collect())
     }
+
+    async fn query_by_client_id(
+        &self,
+        symbol: &str,
+        client_order_id: &str,
+    ) -> Result<Order, OrderError> {
+        let id = Uuid::now_v7().to_string();
+        let ts = timestamp_ms()?;
+        let params = signed_params(
+            order_lookup_by_client_params(&self.api.api_key, symbol, client_order_id, ts),
+            &self.api.secret,
+        )?;
+        let req = ws_request(&id, "order.status", params);
+        let result = self.api.send_and_wait(id, req).await?;
+        parse_order_status_response(&result, symbol, client_order_id)
+    }
 }
 
 fn timestamp_ms() -> Result<u64, OrderError> {
@@ -168,6 +185,9 @@ fn submit_order_params<'a>(
     params.insert("timestamp", json!(ts));
     params.insert("type", json!(order_type_str(&request.order_type)));
 
+    if let Some(client_id) = request.client_order_id.as_deref() {
+        params.insert("newClientOrderId", json!(client_id));
+    }
     if let Some(price) = request.price {
         params.insert("price", json!(price.to_string()));
     }
@@ -181,6 +201,57 @@ fn submit_order_params<'a>(
         params.insert("timeInForce", json!(time_in_force));
     }
     params
+}
+
+fn order_lookup_by_client_params<'a>(
+    api_key: &'a str,
+    symbol: &'a str,
+    client_id: &'a str,
+    ts: u64,
+) -> BTreeMap<&'a str, Value> {
+    let mut params = BTreeMap::new();
+    params.insert("apiKey", json!(api_key));
+    params.insert("origClientOrderId", json!(client_id));
+    params.insert("symbol", json!(symbol));
+    params.insert("timestamp", json!(ts));
+    params
+}
+
+/// 거래소 order.status 응답을 Reconciler가 사용할 부분 Order로 변환.
+///
+/// Reconciler는 exchange_order_id / status / filled_qty / avg_fill_price 4개 필드만 읽으므로
+/// 나머지는 placeholder로 채운다. 호출자는 로컬 PendingSubmit 레코드와 머지해 사용한다.
+fn parse_order_status_response(
+    result: &Value,
+    symbol: &str,
+    client_order_id: &str,
+) -> Result<Order, OrderError> {
+    let status = parse_order_status(result["status"].as_str())
+        .ok_or_else(|| OrderError::Internal(anyhow::anyhow!("status 누락")))?;
+    let exchange_order_id = result["orderId"].as_i64();
+    let filled_qty = decimal_field(result, "executedQty").unwrap_or(Decimal::ZERO);
+    let avg_fill_price = decimal_field(result, "avgPrice").filter(|d| !d.is_zero());
+    let now = Utc::now();
+    Ok(Order {
+        id: Uuid::nil(),
+        client_order_id: client_order_id.to_string(),
+        exchange_order_id,
+        strategy_instance_id: 0,
+        symbol: symbol.to_string(),
+        order_type: OrderType::Market,
+        side: OrderSide::Buy,
+        status,
+        qty: decimal_field(result, "origQty").unwrap_or(Decimal::ZERO),
+        price: decimal_field(result, "price").filter(|d| !d.is_zero()),
+        stop_price: None,
+        filled_qty,
+        avg_fill_price,
+        time_in_force: TimeInForce::Gtc,
+        reduce_only: false,
+        post_only: false,
+        created_at: now,
+        updated_at: now,
+    })
 }
 
 fn order_lookup_params<'a>(
