@@ -1,3 +1,4 @@
+use crate::domain::account::ExchangePositionSnapshot;
 use crate::domain::order::{Fill, OrderSide};
 use crate::domain::position::{Position, StoredPosition};
 use crate::ports::order_repository::RepositoryError;
@@ -164,5 +165,34 @@ impl PositionRepository for PostgresPositionRepository {
 
         tx.commit().await?;
         Ok(next)
+    }
+
+    async fn upsert_from_snapshot(
+        &self,
+        instance_id: i64,
+        snap: &ExchangePositionSnapshot,
+    ) -> Result<(), RepositoryError> {
+        sqlx::query(
+            r#"
+            INSERT INTO positions (
+                strategy_instance_id, symbol, side, qty, avg_entry_price,
+                realized_pnl, last_fill_id, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 0, NULL, NOW())
+            ON CONFLICT (strategy_instance_id, symbol) DO UPDATE SET
+                side            = EXCLUDED.side,
+                qty             = EXCLUDED.qty,
+                avg_entry_price = EXCLUDED.avg_entry_price,
+                updated_at      = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(instance_id)
+        .bind(&snap.symbol)
+        .bind(snap.side)
+        .bind(snap.qty)
+        .bind(snap.entry_price)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

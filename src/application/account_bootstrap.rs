@@ -1,8 +1,10 @@
 use crate::domain::account::AccountSnapshot;
 use crate::domain::order::{ExchangeOpenOrder, Order, OrderStatus};
+use crate::domain::strategies::StrategyInstance;
 use crate::ports::outbound::account_source::AccountSource;
 use crate::ports::outbound::order_executor::OrderExecutor;
 use crate::ports::outbound::order_repository::OrderRepository;
+use crate::ports::outbound::position_repository::PositionRepository;
 use std::future::Future;
 use tracing::{info, warn};
 
@@ -35,11 +37,13 @@ where
     }
 }
 
-/// 계정 스냅샷 조회 + 오픈 주문 정합 + PendingSubmit 재조정을 수행한다.
+/// 계정 스냅샷 조회 + 오픈 주문 정합 + PendingSubmit 재조정 + 포지션 동기화를 수행한다.
 pub async fn bootstrap(
     account_src: &dyn AccountSource,
     executor: &dyn OrderExecutor,
     order_repo: &dyn OrderRepository,
+    position_repo: &dyn PositionRepository,
+    instances: &[StrategyInstance],
     symbols: &[String],
 ) -> Result<AccountSnapshot, BootstrapError> {
     let snap = retry(3, || account_src.fetch_account())
@@ -59,8 +63,35 @@ pub async fn bootstrap(
 
     resolve_pending_submits(executor, order_repo).await;
 
+    sync_positions(account_src, position_repo, instances).await;
+
     info!("부팅 동기화 완료");
     Ok(snap)
+}
+
+async fn sync_positions(
+    account_src: &dyn AccountSource,
+    position_repo: &dyn PositionRepository,
+    instances: &[StrategyInstance],
+) {
+    let exchange_positions = match retry(3, || account_src.fetch_positions()).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, "거래소 포지션 조회 실패 — 포지션 동기화 건너뜀");
+            return;
+        }
+    };
+    for inst in instances {
+        for symbol in &inst.symbols {
+            if let Some(snap) = exchange_positions.iter().find(|p| p.symbol == *symbol) {
+                if let Err(e) = position_repo.upsert_from_snapshot(inst.id, snap).await {
+                    warn!(instance_id = inst.id, %symbol, error = %e, "포지션 동기화 실패");
+                } else {
+                    info!(instance_id = inst.id, %symbol, qty = %snap.qty, "거래소 포지션 동기화");
+                }
+            }
+        }
+    }
 }
 
 async fn reconcile_open_orders(

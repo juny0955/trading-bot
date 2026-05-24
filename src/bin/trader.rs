@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     }
     let symbols = collect_symbols(&instances);
 
-    sync_state(&boot, &exchange_info_client, &account_client, &*executor, &*repo, &symbols).await;
+    sync_state(&boot, &exchange_info_client, &account_client, &*executor, &*repo, &symbols, &instances).await;
 
     let risk = Arc::new(RiskController::new(
         boot.risk_limits.clone(),
@@ -181,13 +181,14 @@ async fn sync_state(
     executor: &dyn OrderExecutor,
     repo: &dyn OrderRepository,
     symbols: &[String],
+    instances: &[StrategyInstance],
 ) {
     match boot.filters_cache.refresh(exchange_info_client).await {
         Ok(n) => info!(count = n, "ExchangeInfo 로드 완료"),
         Err(e) => warn!(error = %e, "ExchangeInfo 초기 로드 실패 — 계속 진행"),
     }
 
-    match account_bootstrap::bootstrap(account_client, executor, repo, symbols).await {
+    match account_bootstrap::bootstrap(account_client, executor, repo, &*boot.position_repo, instances, symbols).await {
         Ok(snap) => {
             boot.account_state.try_replace(snap);
             info!("계정 동기화 완료");
