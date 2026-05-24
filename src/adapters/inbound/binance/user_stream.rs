@@ -2,10 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::adapters::binance::api::BinanceOrderApi;
-use crate::adapters::binance::dto_account::BinanceOrderTradeUpdate;
+use crate::adapters::binance::dto_account::{BinanceOrderTradeUpdate, parse_account_update_event};
 use crate::adapters::binance::ws::reconnect::{
     ReconnectConfig, WsError, WsSession, run_with_reconnect,
 };
+use crate::application::account_state::AccountState;
 use crate::application::order_execution_event::OrderExecutionEvent;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -24,6 +25,7 @@ pub struct BinanceUserStreamHandler {
 struct UserStreamSession {
     api: Arc<BinanceOrderApi>,
     tx: Sender<OrderExecutionEvent>,
+    account_state: Arc<AccountState>,
 }
 
 #[async_trait]
@@ -66,19 +68,30 @@ impl WsSession for UserStreamSession {
                 msg = time::timeout(Duration::from_secs(240), read.next()) => {
                     match msg {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            if let Ok(val) = serde_json::from_str::<Value>(&text)
-                            && val["e"].as_str() == Some("ORDER_TRADE_UPDATE") {
-                                match BinanceOrderTradeUpdate::from_value(&val) {
-                                    Ok(dto) => {
-                                        let event = dto.into_execution_event();
-                                        if self.tx.send(event).await.is_err() {
-                                            warn!("OrderExecutionEvent 채널 닫힘 — 체결 이벤트 손실");
-                                            return Ok(());
+                            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                                match val["e"].as_str() {
+                                    Some("ORDER_TRADE_UPDATE") => {
+                                        match BinanceOrderTradeUpdate::from_value(&val) {
+                                            Ok(dto) => {
+                                                let event = dto.into_execution_event();
+                                                if self.tx.send(event).await.is_err() {
+                                                    warn!("OrderExecutionEvent 채널 닫힘 — 체결 이벤트 손실");
+                                                    return Ok(());
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!(error = %e, "ORDER_TRADE_UPDATE 파싱 실패");
+                                            }
                                         }
                                     }
-                                    Err(e) => {
-                                        warn!(error = %e, "ORDER_TRADE_UPDATE 파싱 실패");
+                                    Some("ACCOUNT_UPDATE") => {
+                                        if let Some(ev) = parse_account_update_event(&val) {
+                                            self.account_state.apply_account_update(&ev);
+                                        } else {
+                                            warn!("ACCOUNT_UPDATE 파싱 실패");
+                                        }
                                     }
+                                    _ => {}
                                 }
                             }
                         }
@@ -116,11 +129,17 @@ impl BinanceUserStreamHandler {
         Self { api }
     }
 
-    pub async fn run_user_stream(&self, tx: Sender<OrderExecutionEvent>, token: CancellationToken) {
+    pub async fn run_user_stream(
+        &self,
+        tx: Sender<OrderExecutionEvent>,
+        account_state: Arc<AccountState>,
+        token: CancellationToken,
+    ) {
         run_with_reconnect(
             UserStreamSession {
                 api: Arc::clone(&self.api),
                 tx,
+                account_state,
             },
             ReconnectConfig::defaults("User WS"),
             token,

@@ -119,7 +119,8 @@ async fn main() -> Result<()> {
         }),
         tokio::spawn({
             let token = token.clone();
-            async move { user_stream.run_user_stream(event_tx, token).await }
+            let account_state = boot.account_state.clone();
+            async move { user_stream.run_user_stream(event_tx, account_state, token).await }
         }),
         tokio::spawn({
             let token = token.clone();

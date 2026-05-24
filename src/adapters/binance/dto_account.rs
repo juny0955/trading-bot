@@ -1,4 +1,5 @@
 use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
+use crate::domain::account::AccountUpdateEvent;
 use crate::domain::order::{OrderSide, OrderStatus};
 use chrono::{DateTime, TimeZone, Utc};
 use rust_decimal::Decimal;
@@ -154,6 +155,23 @@ fn fill_data(update: &BinanceOrderTradeUpdate) -> Option<FillData> {
         fee_asset: update.fee_asset.clone(),
         filled_at: trade_time(update.trade_time_ms),
         exchange_trade_id: update.trade_id,
+    })
+}
+
+/// Binance ACCOUNT_UPDATE 이벤트를 도메인 타입으로 변환한다.
+/// `a.B[]` 배열에서 USDT 잔고를 찾아 available/wallet 잔고를 추출한다.
+pub fn parse_account_update_event(val: &Value) -> Option<AccountUpdateEvent> {
+    let event_time_ms = val["E"].as_i64()?;
+    let event_time = Utc.timestamp_millis_opt(event_time_ms).single()?;
+    let balances = val["a"]["B"].as_array()?;
+    let usdt = balances.iter().find(|b| b["a"].as_str() == Some("USDT"))?;
+    let total_wallet_balance = decimal_or_zero(usdt, "wb", "wb").ok()?;
+    let available_balance = decimal_or_zero(usdt, "cw", "cw").ok()?;
+    Some(AccountUpdateEvent {
+        available_balance,
+        total_wallet_balance,
+        total_unrealized_pnl: Decimal::ZERO,
+        event_time,
     })
 }
 
