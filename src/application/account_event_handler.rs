@@ -2,6 +2,7 @@ use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
 use crate::domain::order::{Fill, Order, OrderStatus};
 use crate::ports::fill_sink::FillSink;
 use crate::ports::order_repository::OrderRepository;
+use crate::ports::position_repository::PositionRepository;
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -23,6 +24,7 @@ use tracing::{error, info, warn};
 /// ```
 pub struct AccountEventHandler {
     repo: Arc<dyn OrderRepository>,
+    position_repo: Arc<dyn PositionRepository>,
     fill_sink: Arc<dyn FillSink>,
 }
 
@@ -36,12 +38,16 @@ impl AccountEventHandler {
     /// # use trading_bot::application::account_event_handler::AccountEventHandler;
     /// # use trading_bot::ports::fill_sink::FillSink;
     /// # use trading_bot::ports::order_repository::OrderRepository;
-    /// # fn example(repo: Arc<dyn OrderRepository>, fill_sink: Arc<dyn FillSink>) {
-    /// let handler = AccountEventHandler::new(repo, fill_sink);
+    /// # fn example(repo: Arc<dyn OrderRepository>, position_repo: Arc<dyn PositionRepository>, fill_sink: Arc<dyn FillSink>) {
+    /// let handler = AccountEventHandler::new(repo, position_repo, fill_sink);
     /// # }
     /// ```
-    pub fn new(repo: Arc<dyn OrderRepository>, fill_sink: Arc<dyn FillSink>) -> Self {
-        Self { repo, fill_sink }
+    pub fn new(
+        repo: Arc<dyn OrderRepository>,
+        position_repo: Arc<dyn PositionRepository>,
+        fill_sink: Arc<dyn FillSink>,
+    ) -> Self {
+        Self { repo, position_repo, fill_sink }
     }
 
     /// 이벤트 채널을 소비하며 주문 상태와 체결 내역을 반영합니다.
@@ -95,6 +101,9 @@ impl AccountEventHandler {
 
             if let Err(e) = self.repo.record_fill(&fill).await {
                 error!(error = %e, "Fill PG 저장 실패");
+            }
+            if let Err(e) = self.position_repo.apply_fill(order.strategy_instance_id, &fill).await {
+                error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
             }
             self.fill_sink.emit(fill).await;
             info!(symbol = %order.symbol, side = ?fd.side, qty = %fd.qty, price = %fd.price, "Fill 수신");

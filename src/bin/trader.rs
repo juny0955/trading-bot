@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
 
     let (event_tx, event_rx) = mpsc::channel(256);
     let fill_sink = Arc::new(LogFillSink);
-    let handler = Arc::new(AccountEventHandler::new(repo.clone(), fill_sink));
+    let handler = Arc::new(AccountEventHandler::new(repo.clone(), boot.position_repo.clone(), fill_sink));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
     let order_loop = OrderWsLoop::new(api);
     let token = CancellationToken::new();
