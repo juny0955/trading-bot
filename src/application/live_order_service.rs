@@ -6,38 +6,12 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// 실거래 주문 실행기와 저장소를 연결하는 주문 서비스입니다.
-///
-/// # Examples
-///
-/// ```ignore
-/// # use std::sync::Arc;
-/// # use trading_bot::application::live_order_service::LiveOrderService;
-/// # use trading_bot::ports::order_executor::OrderExecutor;
-/// # use trading_bot::ports::order_repository::OrderRepository;
-/// # fn example(executor: Arc<dyn OrderExecutor>, repo: Arc<dyn OrderRepository>) {
-/// let service = LiveOrderService::new(executor, repo);
-/// # }
-/// ```
 pub struct LiveOrderService {
     executor: Arc<dyn OrderExecutor>,
     repo: Arc<dyn OrderRepository>,
 }
 
 impl LiveOrderService {
-    /// 새 실거래 주문 서비스를 생성합니다.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// # use std::sync::Arc;
-    /// # use trading_bot::application::live_order_service::LiveOrderService;
-    /// # use trading_bot::ports::order_executor::OrderExecutor;
-    /// # use trading_bot::ports::order_repository::OrderRepository;
-    /// # fn example(executor: Arc<dyn OrderExecutor>, repo: Arc<dyn OrderRepository>) {
-    /// let service = LiveOrderService::new(executor, repo);
-    /// # }
-    /// ```
     pub fn new(executor: Arc<dyn OrderExecutor>, repo: Arc<dyn OrderRepository>) -> Self {
         Self { executor, repo }
     }
@@ -64,7 +38,6 @@ impl OrderService for LiveOrderService {
     }
 
     async fn sync_open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
-        let orders = self.executor.open_orders(symbol).await?;
-        Ok(orders)
+        self.executor.open_orders(symbol).await
     }
 }
