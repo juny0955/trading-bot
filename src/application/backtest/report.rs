@@ -9,6 +9,22 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 
+/// 백테스트 결과 파일 전체를 출력합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use std::path::Path;
+/// # use trading_bot::application::backtest::engine::BacktestResult;
+/// # fn example(result: &BacktestResult) -> anyhow::Result<()> {
+/// let invocation = serde_json::json!({ "symbol": "BTCUSDT" });
+/// trading_bot::application::backtest::report::write_all(
+///     result,
+///     Path::new("out/backtest"),
+///     &invocation,
+/// )?;
+/// # Ok(()) }
+/// ```
 pub fn write_all(
     result: &BacktestResult,
     out_dir: &Path,
@@ -73,6 +89,30 @@ fn write_equity(out_dir: &Path, curve: &[EquityPoint]) -> Result<()> {
     Ok(())
 }
 
+/// 백테스트 요약 지표입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::report::Summary;
+///
+/// let summary = Summary {
+///     initial_equity: dec!(1000),
+///     final_equity: dec!(1100),
+///     total_pnl: dec!(100),
+///     total_pnl_pct: dec!(10),
+///     num_trades: 0,
+///     win_rate: dec!(0),
+///     max_drawdown_pct: dec!(0),
+///     sharpe_ratio: None,
+///     profit_factor: None,
+///     avg_win: dec!(0),
+///     avg_loss: dec!(0),
+///     avg_trade_duration_s: dec!(0),
+/// };
+/// assert_eq!(summary.total_pnl_pct, dec!(10));
+/// ```
 #[derive(Serialize)]
 pub struct Summary {
     pub initial_equity: Decimal,
@@ -89,34 +129,32 @@ pub struct Summary {
     pub avg_trade_duration_s: Decimal,
 }
 
+/// 백테스트 결과에서 요약 지표를 계산합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use trading_bot::application::backtest::engine::BacktestResult;
+/// # fn example(result: &BacktestResult) {
+/// let summary = trading_bot::application::backtest::report::build_summary(result);
+/// assert_eq!(summary.num_trades, result.portfolio.closed_trades.len());
+/// # }
+/// ```
 pub fn build_summary(result: &BacktestResult) -> Summary {
     let initial = result.portfolio.initial_equity;
     let final_eq = result.portfolio.equity;
     let total_pnl = final_eq - initial;
-    let total_pnl_pct = if initial.is_zero() {
-        Decimal::zero()
-    } else {
-        total_pnl / initial * Decimal::from(100)
-    };
     let trades = &result.portfolio.closed_trades;
     let num_trades = trades.len();
-    let wins = trades
-        .iter()
-        .filter(|t| t.net_pnl > Decimal::zero())
-        .count();
-    let win_rate = if num_trades == 0 {
-        Decimal::zero()
-    } else {
-        Decimal::from(wins) / Decimal::from(num_trades)
-    };
     let (avg_win, avg_loss) = avg_win_loss(trades);
+
     Summary {
         initial_equity: initial,
         final_equity: final_eq,
         total_pnl,
-        total_pnl_pct,
+        total_pnl_pct: pct_change(initial, final_eq),
         num_trades,
-        win_rate,
+        win_rate: win_rate(trades),
         max_drawdown_pct: max_drawdown_pct(&result.equity_curve),
         sharpe_ratio: sharpe_ratio(&result.equity_curve),
         profit_factor: profit_factor(trades),
@@ -131,6 +169,26 @@ fn write_summary(out_dir: &Path, result: &BacktestResult) -> Result<()> {
     let f = File::create(out_dir.join("summary.json"))?;
     serde_json::to_writer_pretty(f, &summary)?;
     Ok(())
+}
+
+fn pct_change(initial: Decimal, final_value: Decimal) -> Decimal {
+    if initial.is_zero() {
+        Decimal::zero()
+    } else {
+        (final_value - initial) / initial * Decimal::from(100)
+    }
+}
+
+fn win_rate(trades: &[ClosedTrade]) -> Decimal {
+    if trades.is_empty() {
+        return Decimal::zero();
+    }
+
+    let wins = trades
+        .iter()
+        .filter(|trade| trade.net_pnl > Decimal::zero())
+        .count();
+    Decimal::from(wins) / Decimal::from(trades.len())
 }
 
 fn max_drawdown_pct(curve: &[EquityPoint]) -> Decimal {
@@ -221,5 +279,67 @@ fn side_str(s: OrderSide) -> &'static str {
     match s {
         OrderSide::Buy => "long",
         OrderSide::Sell => "short",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::backtest::backtest_executor::PortfolioSnapshot;
+    use crate::domain::position::Position;
+    use rust_decimal_macros::dec;
+
+    fn result_with_trade(net_pnl: Decimal) -> BacktestResult {
+        BacktestResult {
+            portfolio: PortfolioSnapshot {
+                equity: dec!(1100),
+                initial_equity: dec!(1000),
+                position: Position::default(),
+                closed_trades: vec![ClosedTrade {
+                    entry_ts_ns: 0,
+                    exit_ts_ns: 1_000_000_000,
+                    side: OrderSide::Buy,
+                    qty: dec!(1),
+                    entry_price: dec!(100),
+                    exit_price: dec!(110),
+                    fees: dec!(1),
+                    gross_pnl: dec!(10),
+                    net_pnl,
+                }],
+            },
+            equity_curve: vec![
+                EquityPoint {
+                    ts_ns: 0,
+                    equity: dec!(1000),
+                    position_qty: dec!(0),
+                    mark_price: dec!(100),
+                },
+                EquityPoint {
+                    ts_ns: 1,
+                    equity: dec!(900),
+                    position_qty: dec!(0),
+                    mark_price: dec!(90),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn build_summary_calculates_core_metrics() -> anyhow::Result<()> {
+        let summary = build_summary(&result_with_trade(dec!(9)));
+        assert_eq!(summary.total_pnl, dec!(100));
+        assert_eq!(summary.total_pnl_pct, dec!(10.0));
+        assert_eq!(summary.win_rate, dec!(1));
+        assert_eq!(summary.max_drawdown_pct, dec!(10.0));
+        assert_eq!(summary.avg_trade_duration_s, dec!(1));
+        Ok(())
+    }
+
+    #[test]
+    fn build_summary_handles_losses() -> anyhow::Result<()> {
+        let summary = build_summary(&result_with_trade(dec!(-3)));
+        assert_eq!(summary.win_rate, dec!(0));
+        assert_eq!(summary.avg_loss, dec!(3));
+        Ok(())
     }
 }

@@ -10,6 +10,16 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+/// 실시간 시장 데이터와 공포탐욕지수를 수집해 저장 sink로 전달하는 유스케이스입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::application::market_data_collector::MarketDataCollector;
+///
+/// let collector = MarketDataCollector::new();
+/// let _ = collector;
+/// ```
 pub struct MarketDataCollector;
 
 impl Default for MarketDataCollector {
@@ -19,6 +29,16 @@ impl Default for MarketDataCollector {
 }
 
 impl MarketDataCollector {
+    /// 새 시장 데이터 수집 유스케이스를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::application::market_data_collector::MarketDataCollector;
+    ///
+    /// let collector = MarketDataCollector::new();
+    /// let _ = collector;
+    /// ```
     pub fn new() -> Self {
         Self
     }

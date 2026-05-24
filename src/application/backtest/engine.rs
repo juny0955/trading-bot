@@ -6,11 +6,32 @@ use crate::ports::market_data_source::{
     BarInterval, BarQuery, DepthQuery, DepthSampleInterval, MarketDataSource,
 };
 use crate::ports::order_executor::OrderExecutor;
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tracing::info;
 
+/// 백테스트 실행 조건입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::engine::BacktestConfig;
+/// use trading_bot::ports::market_data_source::{BarInterval, DepthSampleInterval};
+///
+/// let cfg = BacktestConfig {
+///     symbol: "BTCUSDT".into(),
+///     from_ns: 0,
+///     to_ns: 1,
+///     bar_interval: BarInterval::Min(1),
+///     depth_every: DepthSampleInterval::Sec(1),
+///     initial_equity: dec!(10_000),
+///     fee_bps: dec!(4),
+///     depth_freshness_sec: 5,
+/// };
+/// assert_eq!(cfg.symbol, "BTCUSDT");
+/// ```
 #[derive(Clone)]
 pub struct BacktestConfig {
     pub symbol: String,
@@ -23,6 +44,22 @@ pub struct BacktestConfig {
     pub depth_freshness_sec: i64,
 }
 
+/// 백테스트 equity curve의 한 시점입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::engine::EquityPoint;
+///
+/// let point = EquityPoint {
+///     ts_ns: 1,
+///     equity: dec!(1000),
+///     position_qty: dec!(0),
+///     mark_price: dec!(100),
+/// };
+/// assert_eq!(point.equity, dec!(1000));
+/// ```
 #[derive(Debug, Clone)]
 pub struct EquityPoint {
     pub ts_ns: i64,
@@ -31,11 +68,49 @@ pub struct EquityPoint {
     pub mark_price: Decimal,
 }
 
+/// 백테스트 실행 결과입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+/// use trading_bot::application::backtest::engine::BacktestResult;
+///
+/// let executor = BacktestOrderExecutor::new(dec!(1000), dec!(0)).unwrap();
+/// let result = BacktestResult {
+///     portfolio: executor.snapshot().unwrap(),
+///     equity_curve: Vec::new(),
+/// };
+/// assert!(result.equity_curve.is_empty());
+/// ```
 pub struct BacktestResult {
     pub portfolio: PortfolioSnapshot,
     pub equity_curve: Vec<EquityPoint>,
 }
 
+/// 저장소에서 봉/호가 이벤트를 조회하고 시간 순서로 병합합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # async fn example(src: &dyn trading_bot::ports::market_data_source::MarketDataSource) -> anyhow::Result<()> {
+/// # use rust_decimal_macros::dec;
+/// # use trading_bot::application::backtest::engine::{fetch_events, BacktestConfig};
+/// # use trading_bot::ports::market_data_source::{BarInterval, DepthSampleInterval};
+/// let cfg = BacktestConfig {
+///     symbol: "BTCUSDT".into(),
+///     from_ns: 0,
+///     to_ns: 1,
+///     bar_interval: BarInterval::Min(1),
+///     depth_every: DepthSampleInterval::Sec(1),
+///     initial_equity: dec!(1000),
+///     fee_bps: dec!(0),
+///     depth_freshness_sec: 5,
+/// };
+/// let events = fetch_events(src, &cfg).await?;
+/// # Ok(()) }
+/// ```
 pub async fn fetch_events(src: &dyn MarketDataSource, cfg: &BacktestConfig) -> Result<Vec<Event>> {
     let (bars, depths) = tokio::join!(
         src.fetch_bars(BarQuery {
@@ -62,11 +137,11 @@ async fn run_inner(
     cfg: &BacktestConfig,
     strategy: &mut dyn Strategy,
 ) -> Result<BacktestResult> {
-    let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
+    let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps)?);
 
     if events.is_empty() {
         return Ok(BacktestResult {
-            portfolio: executor.snapshot(),
+            portfolio: executor.snapshot()?,
             equity_curve: Vec::new(),
         });
     }
@@ -76,27 +151,22 @@ async fn run_inner(
     let depth_fresh_ns = cfg.depth_freshness_sec.saturating_mul(1_000_000_000);
 
     {
-        let ctx = make_ctx(&executor, events[0].ts_ns());
+        let ctx = make_ctx(&executor, events[0].ts_ns())?;
         let cmds = strategy.on_start(&ctx)?;
-        dispatch(&executor, cmds).await;
+        dispatch(&executor, cmds).await?;
     }
 
     for ev in events {
         let ts = ev.ts_ns();
         let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Buy);
         let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Sell);
-        executor.drain_pending(buy_price, sell_price, ts);
+        executor.drain_pending(buy_price, sell_price, ts)?;
 
         let mark = event_mark_price(ev);
-        executor.mark(mark);
-        equity_curve.push(EquityPoint {
-            ts_ns: ts,
-            equity: executor.equity(),
-            position_qty: executor.position().qty,
-            mark_price: mark,
-        });
+        executor.mark(mark)?;
+        equity_curve.push(equity_point(&executor, ts, mark)?);
 
-        let ctx = make_ctx(&executor, ts);
+        let ctx = make_ctx(&executor, ts)?;
         let cmds = match ev {
             Event::Bar(b) => strategy.on_bar(b, &ctx)?,
             Event::Depth(d) => {
@@ -104,19 +174,43 @@ async fn run_inner(
                 strategy.on_depth(d, &ctx)?
             }
         };
-        dispatch(&executor, cmds).await;
+        dispatch(&executor, cmds).await?;
     }
 
-    // 종료 시 잔여 포지션 시장가 청산 (마지막 이벤트 가격으로)
-    if let Some(cur_side) = executor.position().side {
+    close_open_position(&executor, cfg, events, &mut equity_curve).await?;
+
+    {
+        let last = events
+            .last()
+            .map(Event::ts_ns)
+            .context("events must not be empty after early return")?;
+        let ctx = make_ctx(&executor, last)?;
+        let cmds = strategy.on_finish(&ctx)?;
+        dispatch(&executor, cmds).await?;
+    }
+
+    Ok(BacktestResult {
+        portfolio: executor.snapshot()?,
+        equity_curve,
+    })
+}
+
+async fn close_open_position(
+    executor: &Arc<BacktestOrderExecutor>,
+    cfg: &BacktestConfig,
+    events: &[Event],
+    equity_curve: &mut [EquityPoint],
+) -> Result<()> {
+    if let Some(cur_side) = executor.position()?.side {
         let last = &events[events.len() - 1];
         let close_price = event_mark_price(last);
         let close_side = match cur_side {
             OrderSide::Buy => OrderSide::Sell,
             OrderSide::Sell => OrderSide::Buy,
         };
-        let qty = executor.position().qty;
-        let _ = executor
+        let qty = executor.position()?.qty;
+        // 종료 시 잔여 포지션은 마지막 관측 가격으로 시장가 청산한다.
+        executor
             .submit(OrderRequest {
                 symbol: cfg.symbol.clone(),
                 order_type: OrderType::Market,
@@ -125,27 +219,30 @@ async fn run_inner(
                 reduce_only: true,
                 ..Default::default()
             })
-            .await;
-        executor.drain_pending(close_price, close_price, last.ts_ns());
+            .await?;
+        executor.drain_pending(close_price, close_price, last.ts_ns())?;
         if let Some(p) = equity_curve.last_mut() {
-            p.equity = executor.equity();
+            p.equity = executor.equity()?;
             p.position_qty = Decimal::ZERO;
         }
     }
-
-    {
-        let last = events.last().unwrap().ts_ns();
-        let ctx = make_ctx(&executor, last);
-        let cmds = strategy.on_finish(&ctx)?;
-        dispatch(&executor, cmds).await;
-    }
-
-    Ok(BacktestResult {
-        portfolio: executor.snapshot(),
-        equity_curve,
-    })
+    Ok(())
 }
 
+/// 시장 데이터 소스에서 이벤트를 가져와 전략을 실행합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # async fn example(
+/// #     src: &dyn trading_bot::ports::market_data_source::MarketDataSource,
+/// #     cfg: trading_bot::application::backtest::engine::BacktestConfig,
+/// #     strategy: &mut dyn trading_bot::domain::strategies::Strategy,
+/// # ) -> anyhow::Result<()> {
+/// let result = trading_bot::application::backtest::engine::run(src, cfg, strategy).await?;
+/// assert!(!result.equity_curve.is_empty() || result.portfolio.closed_trades.is_empty());
+/// # Ok(()) }
+/// ```
 pub async fn run(
     src: &dyn MarketDataSource,
     cfg: BacktestConfig,
@@ -155,6 +252,22 @@ pub async fn run(
     run_inner(&events, &cfg, strategy).await
 }
 
+/// 이미 로드된 이벤트 목록으로 전략을 실행합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # async fn example(
+/// #     cfg: trading_bot::application::backtest::engine::BacktestConfig,
+/// #     strategy: Box<dyn trading_bot::domain::strategies::Strategy>,
+/// # ) -> anyhow::Result<()> {
+/// use std::sync::Arc;
+///
+/// let events = Arc::new(Vec::new());
+/// let result = trading_bot::application::backtest::engine::run_on_events(events, cfg, strategy).await?;
+/// assert!(result.equity_curve.is_empty());
+/// # Ok(()) }
+/// ```
 pub async fn run_on_events(
     events: Arc<Vec<Event>>,
     cfg: BacktestConfig,
@@ -163,22 +276,36 @@ pub async fn run_on_events(
     run_inner(&events, &cfg, strategy.as_mut()).await
 }
 
-fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Context {
-    Context {
+fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Result<Context> {
+    Ok(Context {
         now_ns: ts_ns,
-        equity: executor.equity(),
-        position: executor.position(),
-    }
+        equity: executor.equity()?,
+        position: executor.position()?,
+    })
 }
 
-async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyCommand>) {
+fn equity_point(
+    executor: &Arc<BacktestOrderExecutor>,
+    ts_ns: i64,
+    mark_price: Decimal,
+) -> Result<EquityPoint> {
+    Ok(EquityPoint {
+        ts_ns,
+        equity: executor.equity()?,
+        position_qty: executor.position()?.qty,
+        mark_price,
+    })
+}
+
+async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyCommand>) -> Result<()> {
     for cmd in cmds {
         match cmd {
             StrategyCommand::SubmitOrder(req) => {
-                let _ = executor.submit(req).await;
+                executor.submit(req).await?;
             }
         }
     }
+    Ok(())
 }
 
 fn pick_price(
@@ -209,29 +336,20 @@ fn event_mark_price(ev: &Event) -> Decimal {
 }
 
 fn merge_events(bars: Vec<Bar>, depths: Vec<DepthSnapshot>) -> Vec<Event> {
-    let mut out = Vec::with_capacity(bars.len() + depths.len());
-    let mut bars_it = bars.into_iter();
-    let mut depths_it = depths.into_iter();
+    let mut out: Vec<Event> = bars
+        .into_iter()
+        .map(Event::Bar)
+        .chain(depths.into_iter().map(Event::Depth))
+        .collect();
 
-    let mut next_bar = bars_it.next();
-    let mut next_depth = depths_it.next();
-
-    while next_bar.is_some() || next_depth.is_some() {
-        match (&next_bar, &next_depth) {
-            (Some(b), Some(d)) if b.ts_ns <= d.ts_ns => {
-                out.push(Event::Bar(next_bar.take().unwrap()));
-                next_bar = bars_it.next();
-            }
-            (None, Some(_)) | (Some(_), Some(_)) => {
-                out.push(Event::Depth(next_depth.take().unwrap()));
-                next_depth = depths_it.next();
-            }
-            (Some(_), None) => {
-                out.push(Event::Bar(next_bar.take().unwrap()));
-                next_bar = bars_it.next();
-            }
-            (None, None) => unreachable!(),
-        }
-    }
+    // 동일 timestamp에서는 기존 동작처럼 Bar를 Depth보다 먼저 처리한다.
+    out.sort_by_key(|event| (event.ts_ns(), event_priority(event)));
     out
+}
+
+fn event_priority(event: &Event) -> u8 {
+    match event {
+        Event::Bar(_) => 0,
+        Event::Depth(_) => 1,
+    }
 }

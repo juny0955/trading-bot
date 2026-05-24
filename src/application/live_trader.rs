@@ -17,12 +17,38 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+/// 실시간 시장 이벤트를 전략에 전달하고 전략 명령을 주문 서비스로 실행합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use std::sync::Arc;
+/// # use trading_bot::application::live_trader::LiveTrader;
+/// # use trading_bot::ports::order_service::OrderService;
+/// # use trading_bot::ports::position_repository::PositionRepository;
+/// # fn example(order_svc: Arc<dyn OrderService>, position_repo: Arc<dyn PositionRepository>) {
+/// let trader = LiveTrader::new(order_svc, position_repo);
+/// # }
+/// ```
 pub struct LiveTrader {
     order_svc: Arc<dyn OrderService>,
     position_repo: Arc<dyn PositionRepository>,
 }
 
 impl LiveTrader {
+    /// 새 실시간 트레이더 유스케이스를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use std::sync::Arc;
+    /// # use trading_bot::application::live_trader::LiveTrader;
+    /// # use trading_bot::ports::order_service::OrderService;
+    /// # use trading_bot::ports::position_repository::PositionRepository;
+    /// # fn example(order_svc: Arc<dyn OrderService>, position_repo: Arc<dyn PositionRepository>) {
+    /// let trader = LiveTrader::new(order_svc, position_repo);
+    /// # }
+    /// ```
     pub fn new(
         order_svc: Arc<dyn OrderService>,
         position_repo: Arc<dyn PositionRepository>,
@@ -43,30 +69,15 @@ impl TradingUseCase for LiveTrader {
         token: CancellationToken,
     ) -> Result<()> {
         let (market_tx, mut market_rx) = mpsc::channel::<MarketDataEvent>(256);
-
-        let feed_token = token.clone();
-        tokio::spawn(async move {
-            feed.run(market_tx, feed_token).await;
-        });
-
-        for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
-            let ctx = make_ctx(&self.position_repo, instance_id, symbol, now_ns()).await;
-            let cmds = strategy.on_start(&ctx)?;
-            dispatch(&self.order_svc, instance_id, symbol, cmds).await;
-        }
+        spawn_market_feed(feed, market_tx, token.clone());
+        start_strategies(&self.position_repo, &self.order_svc, &mut strategies).await?;
 
         loop {
             tokio::select! {
                 _ = token.cancelled() => break,
                 event = market_rx.recv() => match event {
                     Some(e) => {
-                        let symbol = event_symbol(&e);
-                        for (&(instance_id, ref entry_symbol), strategy) in strategies.iter_mut() {
-                            if entry_symbol != &symbol { continue; }
-                            let ctx = make_ctx(&self.position_repo, instance_id, entry_symbol, now_ns()).await;
-                            let cmds = on_event(&mut **strategy, &e, &ctx)?;
-                            dispatch(&self.order_svc, instance_id, entry_symbol, cmds).await;
-                        }
+                        process_market_event(&self.position_repo, &self.order_svc, &mut strategies, &e).await?;
                     }
                     None => {
                         error!("market feed 채널 닫힘");
@@ -76,14 +87,64 @@ impl TradingUseCase for LiveTrader {
             }
         }
 
-        for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
-            let ctx = make_ctx(&self.position_repo, instance_id, symbol, now_ns()).await;
-            let cmds = strategy.on_finish(&ctx)?;
-            info!(cmds = cmds.len(), "전략 on_finish");
-            dispatch(&self.order_svc, instance_id, symbol, cmds).await;
-        }
+        finish_strategies(&self.position_repo, &self.order_svc, &mut strategies).await?;
         Ok(())
     }
+}
+
+fn spawn_market_feed(
+    feed: Box<dyn MarketDataProvider>,
+    market_tx: mpsc::Sender<MarketDataEvent>,
+    token: CancellationToken,
+) {
+    tokio::spawn(async move {
+        feed.run(market_tx, token).await;
+    });
+}
+
+async fn start_strategies(
+    position_repo: &Arc<dyn PositionRepository>,
+    order_svc: &Arc<dyn OrderService>,
+    strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
+) -> Result<()> {
+    for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
+        let ctx = make_ctx(position_repo, instance_id, symbol, now_ns()).await;
+        let cmds = strategy.on_start(&ctx)?;
+        dispatch(order_svc, instance_id, symbol, cmds).await;
+    }
+    Ok(())
+}
+
+async fn process_market_event(
+    position_repo: &Arc<dyn PositionRepository>,
+    order_svc: &Arc<dyn OrderService>,
+    strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
+    event: &MarketDataEvent,
+) -> Result<()> {
+    let symbol = event_symbol(event);
+    for (&(instance_id, ref entry_symbol), strategy) in strategies.iter_mut() {
+        if entry_symbol != &symbol {
+            continue;
+        }
+        let ctx = make_ctx(position_repo, instance_id, entry_symbol, now_ns()).await;
+        let cmds = on_event(&mut **strategy, event, &ctx)?;
+        dispatch(order_svc, instance_id, entry_symbol, cmds).await;
+    }
+    Ok(())
+}
+
+async fn finish_strategies(
+    position_repo: &Arc<dyn PositionRepository>,
+    order_svc: &Arc<dyn OrderService>,
+    strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
+) -> Result<()> {
+    for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
+        let ctx = make_ctx(position_repo, instance_id, symbol, now_ns()).await;
+        let cmds = strategy.on_finish(&ctx)?;
+        info!(cmds = cmds.len(), "전략 on_finish");
+        dispatch(order_svc, instance_id, symbol, cmds).await;
+    }
+    Ok(())
 }
 
 fn event_symbol(e: &MarketDataEvent) -> String {
@@ -117,22 +178,40 @@ async fn dispatch(
 ) {
     for cmd in cmds {
         match cmd {
-            StrategyCommand::SubmitOrder(mut req) => {
-                req.strategy_instance_id = instance_id;
-                if req.symbol.is_empty() {
-                    req.symbol = symbol.to_string();
-                }
-                let side = req.side;
-                let qty = req.qty;
-                match svc.submit(req).await {
-                    Ok(order) => {
-                        info!(id = %order.id, instance_id, symbol, ?side, %qty, "주문 제출")
-                    }
-                    Err(e) => error!(error = %e, instance_id, symbol, ?side, %qty, "주문 실패"),
-                }
+            StrategyCommand::SubmitOrder(req) => {
+                submit_order_command(svc, instance_id, symbol, req).await
             }
         }
     }
+}
+
+async fn submit_order_command(
+    svc: &Arc<dyn OrderService>,
+    instance_id: i64,
+    symbol: &str,
+    req: crate::domain::order::OrderRequest,
+) {
+    let req = prepare_order_request(req, instance_id, symbol);
+    let side = req.side;
+    let qty = req.qty;
+    match svc.submit(req).await {
+        Ok(order) => {
+            info!(id = %order.id, instance_id, symbol, ?side, %qty, "주문 제출")
+        }
+        Err(e) => error!(error = %e, instance_id, symbol, ?side, %qty, "주문 실패"),
+    }
+}
+
+fn prepare_order_request(
+    mut req: crate::domain::order::OrderRequest,
+    instance_id: i64,
+    symbol: &str,
+) -> crate::domain::order::OrderRequest {
+    req.strategy_instance_id = instance_id;
+    if req.symbol.is_empty() {
+        req.symbol = symbol.to_string();
+    }
+    req
 }
 
 async fn make_ctx(

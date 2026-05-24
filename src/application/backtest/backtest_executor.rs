@@ -1,4 +1,4 @@
-use crate::application::backtest::portfolio::{ClosedTrade, Portfolio};
+use crate::application::backtest::portfolio::{ClosedTrade, Portfolio, PortfolioError};
 use crate::domain::order::{
     ExchangeOpenOrder, Fill, Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType,
 };
@@ -8,9 +8,44 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
+/// 백테스트 주문 실행기에서 발생하는 애플리케이션 오류입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::application::backtest::backtest_executor::BacktestExecutorError;
+///
+/// let err = BacktestExecutorError::StatePoisoned;
+/// assert!(err.to_string().contains("state"));
+/// ```
+#[derive(Debug, thiserror::Error)]
+pub enum BacktestExecutorError {
+    #[error("backtest state lock poisoned")]
+    StatePoisoned,
+    #[error(transparent)]
+    Portfolio(#[from] PortfolioError),
+}
+
+impl From<BacktestExecutorError> for OrderError {
+    fn from(value: BacktestExecutorError) -> Self {
+        OrderError::Internal(anyhow::anyhow!(value))
+    }
+}
+
+/// 백테스트용 인메모리 주문 실행기입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+///
+/// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(4)).unwrap();
+/// assert_eq!(executor.equity().unwrap(), dec!(10_000));
+/// ```
 pub struct BacktestOrderExecutor {
     state: Mutex<BacktestState>,
 }
@@ -23,6 +58,18 @@ struct BacktestState {
     next_exchange_order_id: i64,
 }
 
+/// 포트폴리오 상태의 읽기 전용 스냅샷입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+///
+/// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+/// let snapshot = executor.snapshot().unwrap();
+/// assert_eq!(snapshot.equity, dec!(10_000));
+/// ```
 #[derive(Clone)]
 pub struct PortfolioSnapshot {
     pub equity: Decimal,
@@ -32,20 +79,47 @@ pub struct PortfolioSnapshot {
 }
 
 impl BacktestOrderExecutor {
-    pub fn new(initial_equity: Decimal, fee_bps: Decimal) -> Self {
-        Self {
+    /// 백테스트 주문 실행기를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// assert!(BacktestOrderExecutor::new(dec!(1000), dec!(1)).is_ok());
+    /// ```
+    pub fn new(initial_equity: Decimal, fee_bps: Decimal) -> Result<Self, BacktestExecutorError> {
+        Ok(Self {
             state: Mutex::new(BacktestState {
-                portfolio: Portfolio::new(initial_equity, fee_bps),
+                portfolio: Portfolio::new(initial_equity, fee_bps)?,
                 orders: HashMap::new(),
                 pending: VecDeque::new(),
                 fills_log: Vec::new(),
                 next_exchange_order_id: 0,
             }),
-        }
+        })
     }
 
-    pub fn drain_pending(&self, buy_price: Decimal, sell_price: Decimal, ts_ns: i64) -> Vec<Fill> {
-        let mut st_guard = self.state.lock().expect("Mutex poisoned");
+    /// 대기 중인 시장가 주문을 지정한 매수/매도 가격으로 체결합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    /// let fills = executor.drain_pending(dec!(100), dec!(99), 1).unwrap();
+    /// assert!(fills.is_empty());
+    /// ```
+    pub fn drain_pending(
+        &self,
+        buy_price: Decimal,
+        sell_price: Decimal,
+        ts_ns: i64,
+    ) -> Result<Vec<Fill>, BacktestExecutorError> {
+        let mut st_guard = self.state()?;
 
         let BacktestState {
             portfolio,
@@ -56,7 +130,7 @@ impl BacktestOrderExecutor {
         } = &mut *st_guard;
 
         if pending.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut result = Vec::with_capacity(pending.len());
 
@@ -67,7 +141,7 @@ impl BacktestOrderExecutor {
                     OrderSide::Sell => sell_price,
                 };
 
-                let fills = portfolio.execute_simulated(order, price, ts_ns);
+                let fills = portfolio.execute_simulated(order, price, ts_ns)?;
 
                 for f in fills.iter().cloned() {
                     fills_log.push(f);
@@ -80,30 +154,80 @@ impl BacktestOrderExecutor {
                 order.updated_at = Utc::now();
             }
         }
-        result
+        Ok(result)
     }
 
-    pub fn mark(&self, mark_price: Decimal) {
-        let mut st = self.state.lock().unwrap();
-        st.portfolio.mark(mark_price);
+    /// 포트폴리오의 mark-to-market 값을 갱신합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    /// executor.mark(dec!(100)).unwrap();
+    /// ```
+    pub fn mark(&self, mark_price: Decimal) -> Result<(), BacktestExecutorError> {
+        let mut st = self.state()?;
+        Ok(st.portfolio.mark(mark_price)?)
     }
 
-    pub fn snapshot(&self) -> PortfolioSnapshot {
-        let st = self.state.lock().unwrap();
-        PortfolioSnapshot {
+    /// 현재 포트폴리오 스냅샷을 반환합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    /// assert_eq!(executor.snapshot().unwrap().initial_equity, dec!(10_000));
+    /// ```
+    pub fn snapshot(&self) -> Result<PortfolioSnapshot, BacktestExecutorError> {
+        let st = self.state()?;
+        Ok(PortfolioSnapshot {
             equity: st.portfolio.equity,
             initial_equity: st.portfolio.initial_equity,
             position: st.portfolio.position.clone(),
             closed_trades: st.portfolio.closed_trades.clone(),
-        }
+        })
     }
 
-    pub fn equity(&self) -> Decimal {
-        self.state.lock().unwrap().portfolio.equity
+    /// 현재 equity를 반환합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    /// assert_eq!(executor.equity().unwrap(), dec!(10_000));
+    /// ```
+    pub fn equity(&self) -> Result<Decimal, BacktestExecutorError> {
+        Ok(self.state()?.portfolio.equity)
     }
 
-    pub fn position(&self) -> Position {
-        self.state.lock().unwrap().portfolio.position.clone()
+    /// 현재 포지션을 반환합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
+    ///
+    /// let executor = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    /// assert!(executor.position().unwrap().side.is_none());
+    /// ```
+    pub fn position(&self) -> Result<Position, BacktestExecutorError> {
+        Ok(self.state()?.portfolio.position.clone())
+    }
+
+    fn state(&self) -> Result<MutexGuard<'_, BacktestState>, BacktestExecutorError> {
+        self.state
+            .lock()
+            .map_err(|_| BacktestExecutorError::StatePoisoned)
     }
 }
 
@@ -117,7 +241,7 @@ impl OrderExecutor for BacktestOrderExecutor {
             )));
         }
         let mut order = Order::new_from_request(request)?;
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state().map_err(OrderError::from)?;
         st.next_exchange_order_id += 1;
         order.exchange_order_id = Some(st.next_exchange_order_id);
         st.orders.insert(order.id, order.clone());
@@ -126,7 +250,7 @@ impl OrderExecutor for BacktestOrderExecutor {
     }
 
     async fn cancel(&self, order: &Order) -> Result<Order, OrderError> {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state().map_err(OrderError::from)?;
         let Some(o) = st.orders.get_mut(&order.id) else {
             return Err(OrderError::NotFound(order.id.to_string()));
         };
@@ -146,7 +270,7 @@ impl OrderExecutor for BacktestOrderExecutor {
     }
 
     async fn query(&self, order: &Order) -> Result<Order, OrderError> {
-        let st = self.state.lock().unwrap();
+        let st = self.state().map_err(OrderError::from)?;
         st.orders
             .get(&order.id)
             .cloned()
@@ -154,7 +278,7 @@ impl OrderExecutor for BacktestOrderExecutor {
     }
 
     async fn open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
-        let st = self.state.lock().unwrap();
+        let st = self.state().map_err(OrderError::from)?;
         st.orders
             .values()
             .filter(|o| o.symbol == symbol && o.status == OrderStatus::New)
@@ -179,23 +303,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn submit_then_drain_fills_at_next_tick() {
-        let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0));
-        let o = ex.submit(req(OrderSide::Buy, dec!(1))).await.unwrap();
-        assert_eq!(ex.query(&o).await.unwrap().status, OrderStatus::New);
-        let fills = ex.drain_pending(dec!(100), dec!(99), 1_000_000);
+    async fn submit_then_drain_fills_at_next_tick() -> anyhow::Result<()> {
+        let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0))?;
+        let o = ex.submit(req(OrderSide::Buy, dec!(1))).await?;
+        assert_eq!(ex.query(&o).await?.status, OrderStatus::New);
+        let fills = ex.drain_pending(dec!(100), dec!(99), 1_000_000)?;
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].price, dec!(100));
-        assert_eq!(ex.query(&o).await.unwrap().status, OrderStatus::Filled);
+        assert_eq!(ex.query(&o).await?.status, OrderStatus::Filled);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn cancel_removes_from_pending() {
-        let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0));
-        let o = ex.submit(req(OrderSide::Buy, dec!(1))).await.unwrap();
-        ex.cancel(&o).await.unwrap();
-        let fills = ex.drain_pending(dec!(100), dec!(99), 1);
+    async fn cancel_removes_from_pending() -> anyhow::Result<()> {
+        let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0))?;
+        let o = ex.submit(req(OrderSide::Buy, dec!(1))).await?;
+        ex.cancel(&o).await?;
+        let fills = ex.drain_pending(dec!(100), dec!(99), 1)?;
         assert!(fills.is_empty());
-        assert_eq!(ex.query(&o).await.unwrap().status, OrderStatus::Cancelled);
+        assert_eq!(ex.query(&o).await?.status, OrderStatus::Cancelled);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_non_market_orders() -> anyhow::Result<()> {
+        let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0))?;
+        let mut request = req(OrderSide::Buy, dec!(1));
+        request.order_type = OrderType::Limit;
+
+        let result = ex.submit(request).await;
+        assert!(matches!(result, Err(OrderError::InvalidRequest(_))));
+        Ok(())
     }
 }
