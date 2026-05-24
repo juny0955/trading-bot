@@ -119,6 +119,9 @@ impl RiskController {
         limits: &RiskLimits,
         est_notional: Decimal,
     ) -> Result<(), RiskError> {
+        if req.reduce_only {
+            return Ok(());
+        }
         let current_notional = self.current_position_notional(req).await;
         let projected = current_notional + est_notional;
         if projected > limits.max_position_notional {
