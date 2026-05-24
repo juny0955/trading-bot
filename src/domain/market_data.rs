@@ -85,6 +85,7 @@ pub struct Depth {
 /// };
 /// assert_eq!(ticker.ask_price, dec!(100));
 /// ```
+#[derive(Debug, Clone)]
 pub struct BookTicker {
     pub symbol: String,
     pub bid_price: Decimal,
