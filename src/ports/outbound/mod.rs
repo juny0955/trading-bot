@@ -1,4 +1,6 @@
+pub mod account_source;
 pub mod config_repository;
+pub mod exchange_info_source;
 pub mod fill_sink;
 pub mod market_data_sink;
 pub mod market_data_source;
@@ -6,4 +8,5 @@ pub mod order_executor;
 pub mod order_repository;
 pub mod order_service;
 pub mod position_repository;
+pub mod risk_config_source;
 pub mod strategy_repository;
