@@ -277,10 +277,11 @@ pub async fn run_on_events(
 }
 
 fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Result<Context> {
+    let (equity, position) = executor.equity_and_position()?;
     Ok(Context {
         now_ns: ts_ns,
-        equity: executor.equity()?,
-        position: executor.position()?,
+        equity,
+        position,
     })
 }
 
@@ -289,10 +290,11 @@ fn equity_point(
     ts_ns: i64,
     mark_price: Decimal,
 ) -> Result<EquityPoint> {
+    let (equity, position) = executor.equity_and_position()?;
     Ok(EquityPoint {
         ts_ns,
-        equity: executor.equity()?,
-        position_qty: executor.position()?.qty,
+        equity,
+        position_qty: position.qty,
         mark_price,
     })
 }

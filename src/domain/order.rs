@@ -336,10 +336,7 @@ impl Order {
         validate_request(&req)?;
         let now = Utc::now();
         let id = Uuid::now_v7();
-        let client_order_id = req
-            .client_order_id
-            .clone()
-            .unwrap_or_else(|| id.to_string());
+        let client_order_id = req.client_order_id.unwrap_or_else(|| id.to_string());
 
         Ok(Self {
             id,

@@ -20,7 +20,7 @@ use rust_decimal::Decimal;
 ///
 /// assert_eq!(position.unrealized(dec!(105)), dec!(10));
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Position {
     pub side: Option<OrderSide>, // qty == 0 일 때 None
     pub qty: Decimal,
@@ -77,7 +77,7 @@ impl Position {
         validate_fill(fill)?;
         validate_position(self)?;
 
-        Ok(apply_valid_fill(self, fill))
+        Ok(apply_valid_fill(*self, fill))
     }
 
     /// 현재 mark 가격 기준 미실현 손익을 계산합니다.
@@ -156,20 +156,13 @@ fn validate_position_positive(name: &str, value: Decimal) -> Result<(), Position
     Ok(())
 }
 
-fn apply_valid_fill(position: &Position, fill: &Fill) -> Position {
-    let position = position_after_fee(position, fill.fee);
+fn apply_valid_fill(mut position: Position, fill: &Fill) -> Position {
+    position.realized_pnl -= fill.fee;
 
     match position.side {
         None => open_position(position.realized_pnl, fill),
-        Some(side) if side == fill.side => increase_position(&position, fill),
-        Some(side) => reduce_or_flip_position(&position, side, fill),
-    }
-}
-
-fn position_after_fee(position: &Position, fee: Decimal) -> Position {
-    Position {
-        realized_pnl: position.realized_pnl - fee,
-        ..position.clone()
+        Some(side) if side == fill.side => increase_position(position, fill),
+        Some(side) => reduce_or_flip_position(position, side, fill),
     }
 }
 
@@ -182,17 +175,17 @@ fn open_position(realized_pnl: Decimal, fill: &Fill) -> Position {
     }
 }
 
-fn increase_position(position: &Position, fill: &Fill) -> Position {
+fn increase_position(position: Position, fill: &Fill) -> Position {
     let new_qty = position.qty + fill.qty;
 
     Position {
         qty: new_qty,
         avg_entry_price: weighted_average_price(position, fill, new_qty),
-        ..position.clone()
+        ..position
     }
 }
 
-fn reduce_or_flip_position(position: &Position, current_side: OrderSide, fill: &Fill) -> Position {
+fn reduce_or_flip_position(position: Position, current_side: OrderSide, fill: &Fill) -> Position {
     if fill.qty <= position.qty {
         reduce_position(position, current_side, fill)
     } else {
@@ -200,7 +193,7 @@ fn reduce_or_flip_position(position: &Position, current_side: OrderSide, fill: &
     }
 }
 
-fn reduce_position(position: &Position, current_side: OrderSide, fill: &Fill) -> Position {
+fn reduce_position(position: Position, current_side: OrderSide, fill: &Fill) -> Position {
     let remaining_qty = position.qty - fill.qty;
     let realized_pnl = position.realized_pnl
         + gross_pnl(current_side, position.avg_entry_price, fill.price, fill.qty);
@@ -217,11 +210,11 @@ fn reduce_position(position: &Position, current_side: OrderSide, fill: &Fill) ->
     Position {
         qty: remaining_qty,
         realized_pnl,
-        ..position.clone()
+        ..position
     }
 }
 
-fn flip_position(position: &Position, current_side: OrderSide, fill: &Fill) -> Position {
+fn flip_position(position: Position, current_side: OrderSide, fill: &Fill) -> Position {
     let close_qty = position.qty;
     let open_qty = fill.qty - close_qty;
     let realized_pnl = position.realized_pnl
@@ -241,7 +234,7 @@ fn flip_position(position: &Position, current_side: OrderSide, fill: &Fill) -> P
     }
 }
 
-fn weighted_average_price(position: &Position, fill: &Fill, new_qty: Decimal) -> Decimal {
+fn weighted_average_price(position: Position, fill: &Fill, new_qty: Decimal) -> Decimal {
     (position.avg_entry_price * position.qty + fill.price * fill.qty) / new_qty
 }
 

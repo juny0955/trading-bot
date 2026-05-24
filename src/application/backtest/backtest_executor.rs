@@ -189,7 +189,7 @@ impl BacktestOrderExecutor {
         Ok(PortfolioSnapshot {
             equity: st.portfolio.equity,
             initial_equity: st.portfolio.initial_equity,
-            position: st.portfolio.position.clone(),
+            position: st.portfolio.position,
             closed_trades: st.portfolio.closed_trades.clone(),
         })
     }
@@ -221,7 +221,13 @@ impl BacktestOrderExecutor {
     /// assert!(executor.position().unwrap().side.is_none());
     /// ```
     pub fn position(&self) -> Result<Position, BacktestExecutorError> {
-        Ok(self.state()?.portfolio.position.clone())
+        Ok(self.state()?.portfolio.position)
+    }
+
+    /// 현재 equity와 포지션을 단 한 번의 락으로 경량 조회합니다.
+    pub fn equity_and_position(&self) -> Result<(Decimal, Position), BacktestExecutorError> {
+        let st = self.state()?;
+        Ok((st.portfolio.equity, st.portfolio.position))
     }
 
     fn state(&self) -> Result<MutexGuard<'_, BacktestState>, BacktestExecutorError> {
