@@ -99,13 +99,12 @@ CREATE TABLE IF NOT EXISTS fills
 CREATE INDEX IF NOT EXISTS idx_fills_strategy_time ON fills (strategy_instance_id, filled_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fills_symbol_time ON fills (symbol, filled_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fills_order_id ON fills (order_id);
+-- 기존 테이블에 exchange_trade_id 컬럼 추가 (idempotent)
+ALTER TABLE fills ADD COLUMN IF NOT EXISTS exchange_trade_id BIGINT;
 -- 재연결/재처리 시 동일 exchange trade를 중복 INSERT 방지
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_fills_dedup
     ON fills (order_id, exchange_trade_id)
     WHERE exchange_trade_id IS NOT NULL;
-
--- 기존 테이블에 exchange_trade_id 컬럼 추가 (idempotent)
-ALTER TABLE fills ADD COLUMN IF NOT EXISTS exchange_trade_id BIGINT;
 
 -- positions
 CREATE TABLE IF NOT EXISTS positions
@@ -122,6 +121,11 @@ CREATE TABLE IF NOT EXISTS positions
     PRIMARY KEY (strategy_instance_id, symbol)
 );
 
+-- mainnet 실거래 arming. 기본값 FALSE — 명시적으로 TRUE 설정 없이는 주문 전송 불가.
+INSERT INTO runtime_config (type, key, value, memo)
+VALUES ('trading', 'live_trading_enabled', 'false', 'mainnet 실거래 arming flag. true로 설정해야 주문 전송 가능')
+ON CONFLICT (type, key) DO NOTHING;
+
 -- orphan_orders: 거래소에는 존재하지만 로컬 DB에 매핑되지 않은 주문 추적
 CREATE TABLE IF NOT EXISTS orphan_orders
 (
@@ -131,3 +135,5 @@ CREATE TABLE IF NOT EXISTS orphan_orders
     detected_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     raw               JSONB       NOT NULL
 );
+ALTER TABLE orphan_orders ADD COLUMN IF NOT EXISTS client_order_id VARCHAR(36);
+ALTER TABLE orphan_orders ADD COLUMN IF NOT EXISTS symbol VARCHAR(20);

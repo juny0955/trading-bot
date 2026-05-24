@@ -34,7 +34,11 @@ impl OutboxOrderService {
         repo: Arc<dyn OrderRepository>,
         risk: Arc<RiskController>,
     ) -> Self {
-        Self { executor, repo, risk }
+        Self {
+            executor,
+            repo,
+            risk,
+        }
     }
 }
 
@@ -60,7 +64,10 @@ impl OrderService for OutboxOrderService {
                 Ok(ack)
             }
             Err(e) if is_definitive_rejection(&e) => {
-                let rejected = Order { status: OrderStatus::Rejected, ..pending.clone() };
+                let rejected = Order {
+                    status: OrderStatus::Rejected,
+                    ..pending.clone()
+                };
                 let _ = self.repo.upsert_order(&rejected).await;
                 Err(e)
             }

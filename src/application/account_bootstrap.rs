@@ -109,7 +109,9 @@ async fn reconcile_open_orders(
         .map_err(|e| BootstrapError::OrderSync(e.to_string()))?;
 
     for db_order in &db_open {
-        if !is_order_on_exchange(db_order, &ex_open) && let Some(eid) = db_order.exchange_order_id {
+        if !is_order_on_exchange(db_order, &ex_open)
+            && let Some(eid) = db_order.exchange_order_id
+        {
             match executor.query(db_order).await {
                 Ok(remote) => {
                     let _ = repo.upsert_order(&remote).await;
@@ -147,7 +149,10 @@ async fn resolve_pending_submits(executor: &dyn OrderExecutor, repo: &dyn OrderR
                     info!(client_order_id=%pending.client_order_id, new_status=?updated.status, "부팅 정합: PendingSubmit → 거래소 상태로 확정");
                 }
                 Err(crate::domain::order::OrderError::NotFound(_)) => {
-                    let rejected = Order { status: OrderStatus::Rejected, ..pending.clone() };
+                    let rejected = Order {
+                        status: OrderStatus::Rejected,
+                        ..pending.clone()
+                    };
                     let _ = repo.upsert_order(&rejected).await;
                     info!(client_order_id=%pending.client_order_id, "부팅 정합: PendingSubmit → Rejected 확정 (NotFound)");
                 }
@@ -160,5 +165,7 @@ async fn resolve_pending_submits(executor: &dyn OrderExecutor, repo: &dyn OrderR
 }
 
 fn is_order_on_exchange(db_order: &Order, ex_open: &[ExchangeOpenOrder]) -> bool {
-    ex_open.iter().any(|ex| Some(ex.exchange_order_id) == db_order.exchange_order_id)
+    ex_open
+        .iter()
+        .any(|ex| Some(ex.exchange_order_id) == db_order.exchange_order_id)
 }

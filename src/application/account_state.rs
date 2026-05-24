@@ -46,7 +46,9 @@ impl AccountState {
             if candidate.fetched_at <= current.fetched_at {
                 return false; // stale → 무시
             }
-            let prev = self.inner.compare_and_swap(&current, Arc::new(candidate.clone()));
+            let prev = self
+                .inner
+                .compare_and_swap(&current, Arc::new(candidate.clone()));
             if Arc::ptr_eq(&prev, &current) {
                 return true;
             }

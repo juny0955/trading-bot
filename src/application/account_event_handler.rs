@@ -1,7 +1,7 @@
 use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
 use crate::domain::order::{Fill, Order, OrderStatus};
 use crate::ports::fill_sink::FillSink;
-use crate::ports::order_repository::OrderRepository;
+use crate::ports::order_repository::{OrderRepository, OrphanOrder};
 use crate::ports::position_repository::PositionRepository;
 use chrono::Utc;
 use std::sync::Arc;
@@ -47,7 +47,11 @@ impl AccountEventHandler {
         position_repo: Arc<dyn PositionRepository>,
         fill_sink: Arc<dyn FillSink>,
     ) -> Self {
-        Self { repo, position_repo, fill_sink }
+        Self {
+            repo,
+            position_repo,
+            fill_sink,
+        }
     }
 
     /// 이벤트 채널을 소비하며 주문 상태와 체결 내역을 반영합니다.
@@ -74,12 +78,13 @@ impl AccountEventHandler {
 
     async fn handle(&self, event: OrderExecutionEvent) {
         let Some(order) = self.find_order(event.exchange_order_id).await else {
-            let raw = serde_json::json!({
-                "exchange_order_id": event.exchange_order_id,
-                "new_status": event.new_status.map(|s| format!("{s:?}")),
-                "cumulative_filled_qty": event.cumulative_filled_qty.to_string(),
-            });
-            if let Err(e) = self.repo.record_orphan(event.exchange_order_id, raw).await {
+            let orphan = OrphanOrder {
+                exchange_order_id: event.exchange_order_id,
+                client_order_id: event.client_order_id,
+                symbol: event.symbol,
+                raw: event.raw_event,
+            };
+            if let Err(e) = self.repo.record_orphan(&orphan).await {
                 error!(error = %e, "orphan 주문 저장 실패");
             }
             return;
@@ -110,7 +115,11 @@ impl AccountEventHandler {
             if let Err(e) = self.repo.record_fill(&fill).await {
                 error!(error = %e, "Fill PG 저장 실패");
             }
-            if let Err(e) = self.position_repo.apply_fill(order.strategy_instance_id, &fill).await {
+            if let Err(e) = self
+                .position_repo
+                .apply_fill(order.strategy_instance_id, &fill)
+                .await
+            {
                 error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
             }
             self.fill_sink.emit(fill).await;

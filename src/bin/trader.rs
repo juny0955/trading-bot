@@ -60,13 +60,29 @@ async fn main() -> Result<()> {
     let repo: Arc<dyn OrderRepository> = Arc::new(PostgresOrderRepository::new(boot.pool.clone()));
     let executor: Arc<dyn OrderExecutor> = Arc::new(BinanceOrderExecutor::new(api.clone()));
 
+    if !boot.config.runtime.trading.live_trading_enabled {
+        anyhow::bail!(
+            "실거래가 비활성화되어 있습니다. \
+            runtime_config에 (type='trading', key='live_trading_enabled', value='true')를 추가하세요."
+        );
+    }
+
     let instances = boot.strategy_repo.load_enabled().await?;
     if instances.is_empty() {
         anyhow::bail!("strategy_instances에 enabled 인스턴스가 없습니다");
     }
     let symbols = collect_symbols(&instances);
 
-    sync_state(&boot, &exchange_info_client, &account_client, &*executor, &*repo, &symbols, &instances).await;
+    sync_state(
+        &boot,
+        &exchange_info_client,
+        &account_client,
+        &*executor,
+        &*repo,
+        &symbols,
+        &instances,
+    )
+    .await;
 
     let risk = Arc::new(RiskController::new(
         boot.risk_limits.clone(),
@@ -92,7 +108,11 @@ async fn main() -> Result<()> {
 
     let (event_tx, event_rx) = mpsc::channel(256);
     let fill_sink = Arc::new(LogFillSink);
-    let handler = Arc::new(AccountEventHandler::new(repo.clone(), boot.position_repo.clone(), fill_sink));
+    let handler = Arc::new(AccountEventHandler::new(
+        repo.clone(),
+        boot.position_repo.clone(),
+        fill_sink,
+    ));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
     let order_loop = OrderWsLoop::new(api);
     let token = CancellationToken::new();
@@ -102,14 +122,10 @@ async fn main() -> Result<()> {
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
     ));
-    let reconciler = OrderReconciler::new(
-        order_svc,
-        executor,
-        repo,
-        boot.risk_limits.clone(),
-        symbols,
-    );
-    let info_refresher = ExchangeInfoRefresher::new(exchange_info_client, boot.filters_cache.clone());
+    let reconciler =
+        OrderReconciler::new(order_svc, executor, repo, boot.risk_limits.clone(), symbols);
+    let info_refresher =
+        ExchangeInfoRefresher::new(exchange_info_client, boot.filters_cache.clone());
     let account_refresher = AccountStateRefresher::new(account_client, boot.account_state.clone());
 
     let mut handles = vec![
@@ -120,7 +136,11 @@ async fn main() -> Result<()> {
         tokio::spawn({
             let token = token.clone();
             let account_state = boot.account_state.clone();
-            async move { user_stream.run_user_stream(event_tx, account_state, token).await }
+            async move {
+                user_stream
+                    .run_user_stream(event_tx, account_state, token)
+                    .await
+            }
         }),
         tokio::spawn({
             let token = token.clone();
@@ -189,7 +209,16 @@ async fn sync_state(
         Err(e) => warn!(error = %e, "ExchangeInfo 초기 로드 실패 — 계속 진행"),
     }
 
-    match account_bootstrap::bootstrap(account_client, executor, repo, &*boot.position_repo, instances, symbols).await {
+    match account_bootstrap::bootstrap(
+        account_client,
+        executor,
+        repo,
+        &*boot.position_repo,
+        instances,
+        symbols,
+    )
+    .await
+    {
         Ok(snap) => {
             boot.account_state.try_replace(snap);
             info!("계정 동기화 완료");

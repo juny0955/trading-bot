@@ -79,13 +79,18 @@ impl RiskController {
 
         self.validate_filters(req, &filters)?;
         let est_notional = self.validate_margin(req, &limits, &filters)?;
-        self.validate_position_limit(req, &limits, est_notional).await?;
+        self.validate_position_limit(req, &limits, est_notional)
+            .await?;
         self.validate_open_order_count(req, &limits).await?;
 
         Ok(())
     }
 
-    fn validate_filters(&self, req: &OrderRequest, filters: &SymbolFilters) -> Result<(), RiskError> {
+    fn validate_filters(
+        &self,
+        req: &OrderRequest,
+        filters: &SymbolFilters,
+    ) -> Result<(), RiskError> {
         filters.validate_qty(req.qty)?;
         if let Some(price) = req.price {
             filters.validate_price(price)?;
@@ -161,7 +166,11 @@ impl RiskController {
                     .book_ticker_cache
                     .get(&req.symbol)
                     .ok_or_else(|| RiskError::NoBookTicker(req.symbol.clone()))?;
-                Ok(estimate_market_notional(req, &bt, limits.slippage_buffer_bps))
+                Ok(estimate_market_notional(
+                    req,
+                    &bt,
+                    limits.slippage_buffer_bps,
+                ))
             }
             _ => {
                 let price = req.price.unwrap_or(Decimal::ZERO);

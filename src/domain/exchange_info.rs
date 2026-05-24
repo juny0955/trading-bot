@@ -53,11 +53,7 @@ impl SymbolFilters {
         Ok(())
     }
 
-    pub fn validate_notional(
-        &self,
-        qty: Decimal,
-        price: Decimal,
-    ) -> Result<(), FilterViolation> {
+    pub fn validate_notional(&self, qty: Decimal, price: Decimal) -> Result<(), FilterViolation> {
         let notional = qty * price;
         if notional < self.min_notional {
             return Err(FilterViolation::NotionalBelowMin {

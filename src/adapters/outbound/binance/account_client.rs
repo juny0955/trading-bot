@@ -24,15 +24,11 @@ impl BinanceAccountClient {
     }
 
     async fn signed_get(&self, path: &str) -> Result<Value, AccountError> {
-        let ts = signing::timestamp_ms()
-            .map_err(|e| AccountError::Network(e.to_string()))?;
+        let ts = signing::timestamp_ms().map_err(|e| AccountError::Network(e.to_string()))?;
         let query = format!("timestamp={ts}&recvWindow=5000");
         let sig = signing::sign(&self.api.secret, &query)
             .map_err(|e| AccountError::Network(e.to_string()))?;
-        let url = format!(
-            "{}{}?{}&signature={}",
-            self.api.rest_base, path, query, sig
-        );
+        let url = format!("{}{}?{}&signature={}", self.api.rest_base, path, query, sig);
         let resp = self
             .api
             .client

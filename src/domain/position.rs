@@ -68,6 +68,7 @@ impl Position {
     ///     fee: dec!(0),
     ///     fee_asset: "USDT".into(),
     ///     filled_at: Utc::now(),
+    ///     exchange_trade_id: 1,
     /// };
     ///
     /// let position = Position::default().apply(&fill).unwrap();

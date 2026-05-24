@@ -20,11 +20,9 @@ impl PostgresRiskConfigRepository {
 #[async_trait]
 impl RiskConfigSource for PostgresRiskConfigRepository {
     async fn load(&self) -> Result<RiskLimits, RepositoryError> {
-        let rows = sqlx::query(
-            r#"SELECT key, value FROM runtime_config WHERE type = 'risk'"#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query(r#"SELECT key, value FROM runtime_config WHERE type = 'risk'"#)
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut limits = RiskLimits::default();
         for row in rows {
@@ -37,7 +35,8 @@ impl RiskConfigSource for PostgresRiskConfigRepository {
 }
 
 fn get_str(row: &sqlx::postgres::PgRow, col: &str) -> Result<String, RepositoryError> {
-    row.try_get(col).map_err(|e| RepositoryError::Storage(e.to_string()))
+    row.try_get(col)
+        .map_err(|e| RepositoryError::Storage(e.to_string()))
 }
 
 fn apply(limits: &mut RiskLimits, key: &str, value: &str) {

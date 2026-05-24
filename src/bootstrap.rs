@@ -1,4 +1,3 @@
-use arc_swap::ArcSwap;
 use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::adapters::outbound::cache::symbol_filters_cache::SymbolFiltersCache;
 use crate::adapters::outbound::postgres::pool::init_db;
@@ -16,6 +15,7 @@ use crate::ports::outbound::risk_config_source::{RiskConfigSource, RiskLimits};
 use crate::ports::position_repository::PositionRepository;
 use crate::ports::strategy_repository::StrategyRepository;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use sqlx::PgPool;

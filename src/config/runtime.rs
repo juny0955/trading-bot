@@ -3,6 +3,13 @@ pub struct RuntimeConfig {
     pub binance: BinanceRuntimeConfig,
     pub alternative: AlternativeRuntimeConfig,
     pub questdb: QuestDbRuntimeConfig,
+    pub trading: TradingRuntimeConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TradingRuntimeConfig {
+    /// mainnet 실거래 arming flag. false이면 주문 전송 불가.
+    pub live_trading_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +67,7 @@ impl RuntimeConfig {
                 "binance" => cfg.binance_rows(key, value),
                 "alternative" => cfg.alternative_rows(key, value),
                 "questdb" => cfg.questdb_rows(key, value),
+                "trading" => cfg.trading_rows(key, value),
                 _ => {}
             }
         }
@@ -88,6 +96,12 @@ impl RuntimeConfig {
             "batch_interval_ms" => parse(value, &mut self.questdb.batch_interval_ms),
             "buffer_max_bytes" => parse(value, &mut self.questdb.buffer_max_bytes),
             _ => {}
+        }
+    }
+
+    fn trading_rows(&mut self, key: &str, value: &str) {
+        if key == "live_trading_enabled" {
+            parse(value, &mut self.trading.live_trading_enabled)
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::domain::order::{Fill, Order, OrderSide, OrderStatus, OrderType, TimeInForce};
-use crate::ports::order_repository::{OrderRepository, RepositoryError};
+use crate::ports::order_repository::{OrderRepository, OrphanOrder, RepositoryError};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -88,6 +88,25 @@ impl From<DbFill> for Fill {
     }
 }
 
+#[derive(sqlx::FromRow)]
+struct DbOrphanOrder {
+    exchange_order_id: i64,
+    client_order_id: Option<String>,
+    symbol: Option<String>,
+    raw: Value,
+}
+
+impl From<DbOrphanOrder> for OrphanOrder {
+    fn from(db: DbOrphanOrder) -> Self {
+        Self {
+            exchange_order_id: db.exchange_order_id,
+            client_order_id: db.client_order_id,
+            symbol: db.symbol,
+            raw: db.raw,
+        }
+    }
+}
+
 // ── Repository ───────────────────────────────────────────────────────────────
 
 /// PostgreSQL 기반 주문/체결 저장소입니다.
@@ -130,22 +149,59 @@ impl OrderRepository for PostgresOrderRepository {
         Self::find_by_exchange_id(self, exchange_id).await
     }
 
+    async fn find_by_client_order_id(
+        &self,
+        client_order_id: &str,
+    ) -> Result<Option<Order>, RepositoryError> {
+        Self::find_by_client_order_id(self, client_order_id).await
+    }
+
     async fn find_by_status(&self, status: OrderStatus) -> Result<Vec<Order>, RepositoryError> {
         Self::find_by_status(self, status).await
     }
 
-    async fn record_orphan(&self, exchange_order_id: i64, raw: Value) -> Result<(), RepositoryError> {
+    async fn record_orphan(&self, orphan: &OrphanOrder) -> Result<(), RepositoryError> {
         sqlx::query(
             r#"
-            INSERT INTO orphan_orders (exchange_order_id, raw)
-            VALUES ($1, $2)
-            ON CONFLICT (exchange_order_id) DO NOTHING
+            INSERT INTO orphan_orders (exchange_order_id, client_order_id, symbol, raw)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (exchange_order_id) DO UPDATE SET
+                client_order_id = COALESCE(EXCLUDED.client_order_id, orphan_orders.client_order_id),
+                symbol          = COALESCE(EXCLUDED.symbol, orphan_orders.symbol),
+                raw             = EXCLUDED.raw
             "#,
         )
-        .bind(exchange_order_id)
-        .bind(raw)
+        .bind(orphan.exchange_order_id)
+        .bind(&orphan.client_order_id)
+        .bind(&orphan.symbol)
+        .bind(&orphan.raw)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn find_orphans(&self, limit: i64) -> Result<Vec<OrphanOrder>, RepositoryError> {
+        Ok(sqlx::query_as::<_, DbOrphanOrder>(
+            r#"
+            SELECT exchange_order_id, client_order_id, symbol, raw
+            FROM orphan_orders
+            ORDER BY detected_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+    }
+
+    async fn delete_orphan(&self, exchange_order_id: i64) -> Result<(), RepositoryError> {
+        sqlx::query(r#"DELETE FROM orphan_orders WHERE exchange_order_id = $1"#)
+            .bind(exchange_order_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -268,10 +324,20 @@ impl PostgresOrderRepository {
         )
     }
 
-    pub async fn find_by_status(
+    pub async fn find_by_client_order_id(
         &self,
-        status: OrderStatus,
-    ) -> Result<Vec<Order>, RepositoryError> {
+        client_order_id: &str,
+    ) -> Result<Option<Order>, RepositoryError> {
+        Ok(
+            sqlx::query_as::<_, DbOrder>(r#"SELECT * FROM orders WHERE client_order_id = $1"#)
+                .bind(client_order_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .map(Into::into),
+        )
+    }
+
+    pub async fn find_by_status(&self, status: OrderStatus) -> Result<Vec<Order>, RepositoryError> {
         Ok(
             sqlx::query_as::<_, DbOrder>(r#"SELECT * FROM orders WHERE status = $1"#)
                 .bind(status)

@@ -1,6 +1,6 @@
-use crate::domain::order::{Order, OrderStatus};
+use crate::domain::order::{Order, OrderError, OrderStatus};
 use crate::ports::outbound::order_executor::OrderExecutor;
-use crate::ports::outbound::order_repository::OrderRepository;
+use crate::ports::outbound::order_repository::{OrderRepository, OrphanOrder};
 use crate::ports::outbound::order_service::OrderService;
 use crate::ports::outbound::risk_config_source::RiskLimits;
 use arc_swap::ArcSwap;
@@ -44,6 +44,7 @@ impl OrderReconciler {
                 _ = token.cancelled() => break,
                 _ = tick.tick() => {
                     let _ = self.resolve_all_pending().await;
+                    let _ = self.resolve_orphans().await;
                     let _ = self.enforce_ttl_and_detect_drift().await;
                 }
             }
@@ -55,6 +56,14 @@ impl OrderReconciler {
             for pending in pendings {
                 self.resolve_pending(&pending).await;
             }
+        }
+        Ok(())
+    }
+
+    async fn resolve_orphans(&self) -> anyhow::Result<()> {
+        let orphans = self.repo.find_orphans(100).await?;
+        for orphan in orphans {
+            self.resolve_orphan(orphan).await;
         }
         Ok(())
     }
@@ -83,7 +92,11 @@ impl OrderReconciler {
     }
 
     async fn resolve_pending(&self, pending: &Order) {
-        match self.executor.query_by_client_id(&pending.symbol, &pending.client_order_id).await {
+        match self
+            .executor
+            .query_by_client_id(&pending.symbol, &pending.client_order_id)
+            .await
+        {
             Ok(remote) => {
                 let updated = Order {
                     exchange_order_id: remote.exchange_order_id,
@@ -95,12 +108,94 @@ impl OrderReconciler {
                 let _ = self.repo.upsert_order(&updated).await;
             }
             Err(crate::domain::order::OrderError::NotFound(_)) => {
-                let rejected = Order { status: OrderStatus::Rejected, ..pending.clone() };
+                let rejected = Order {
+                    status: OrderStatus::Rejected,
+                    ..pending.clone()
+                };
                 let _ = self.repo.upsert_order(&rejected).await;
             }
             Err(e) => {
                 warn!(client_order_id=%pending.client_order_id, error=%e,
                       "pending resolve transient failure — retry next sweep");
+            }
+        }
+    }
+
+    async fn resolve_orphan(&self, orphan: OrphanOrder) {
+        match self
+            .repo
+            .find_by_exchange_id(orphan.exchange_order_id)
+            .await
+        {
+            Ok(Some(_)) => {
+                let _ = self.repo.delete_orphan(orphan.exchange_order_id).await;
+                return;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(
+                    exchange_order_id = orphan.exchange_order_id,
+                    error = %e,
+                    "Reconciler: orphan 로컬 매칭 조회 실패"
+                );
+                return;
+            }
+        }
+
+        let (Some(symbol), Some(client_order_id)) =
+            (orphan.symbol.as_deref(), orphan.client_order_id.as_deref())
+        else {
+            warn!(
+                exchange_order_id = orphan.exchange_order_id,
+                "Reconciler: orphan 매칭에 필요한 symbol/client_order_id 누락"
+            );
+            return;
+        };
+
+        let local = match self.repo.find_by_client_order_id(client_order_id).await {
+            Ok(Some(order)) => order,
+            Ok(None) => return,
+            Err(e) => {
+                warn!(
+                    exchange_order_id = orphan.exchange_order_id,
+                    client_order_id = %client_order_id,
+                    error = %e,
+                    "Reconciler: orphan client_order_id 로컬 조회 실패"
+                );
+                return;
+            }
+        };
+
+        match self
+            .executor
+            .query_by_client_id(symbol, client_order_id)
+            .await
+        {
+            Ok(remote) => {
+                let updated = Order {
+                    exchange_order_id: remote.exchange_order_id.or(Some(orphan.exchange_order_id)),
+                    status: remote.status,
+                    filled_qty: remote.filled_qty,
+                    avg_fill_price: remote.avg_fill_price,
+                    ..local
+                };
+                if self.repo.upsert_order(&updated).await.is_ok() {
+                    let _ = self.repo.delete_orphan(orphan.exchange_order_id).await;
+                    warn!(
+                        exchange_order_id = orphan.exchange_order_id,
+                        client_order_id = %client_order_id,
+                        "Reconciler: orphan 주문을 로컬 주문에 매칭"
+                    );
+                }
+            }
+            Err(OrderError::NotFound(_)) => {}
+            Err(e) => {
+                warn!(
+                    exchange_order_id = orphan.exchange_order_id,
+                    client_order_id = %client_order_id,
+                    error = %e,
+                    "Reconciler: orphan 거래소 조회 실패"
+                );
             }
         }
     }

@@ -39,6 +39,8 @@ pub enum DtoMappingError {
 /// ```
 pub struct BinanceOrderTradeUpdate {
     pub exchange_order_id: i64,
+    pub client_order_id: Option<String>,
+    pub symbol: Option<String>,
     pub execution_type: String, // "TRADE", "NEW", etc.
     pub status: String,         // "FILLED", "PARTIALLY_FILLED", etc.
     pub side: String,
@@ -50,6 +52,7 @@ pub struct BinanceOrderTradeUpdate {
     pub cumulative_filled_qty: Decimal,
     pub avg_fill_price: Decimal,
     pub trade_id: i64,
+    pub raw_event: Value,
 }
 
 impl BinanceOrderTradeUpdate {
@@ -70,6 +73,8 @@ impl BinanceOrderTradeUpdate {
         let o = &val["o"];
         Ok(Self {
             exchange_order_id: required_i64(o, "i", "o.i")?,
+            client_order_id: o["c"].as_str().map(str::to_string),
+            symbol: o["s"].as_str().map(str::to_string),
             execution_type: required_string(o, "x", "o.x")?,
             status: required_string(o, "X", "o.X")?,
             side: required_string(o, "S", "o.S")?,
@@ -81,6 +86,7 @@ impl BinanceOrderTradeUpdate {
             cumulative_filled_qty: decimal_or_zero(o, "z", "o.z")?,
             avg_fill_price: decimal_or_zero(o, "ap", "o.ap")?,
             trade_id: o["t"].as_i64().unwrap_or(-1),
+            raw_event: val.clone(),
         })
     }
 
@@ -105,6 +111,9 @@ impl BinanceOrderTradeUpdate {
             new_status: order_status(&self.status),
             cumulative_filled_qty: self.cumulative_filled_qty,
             avg_fill_price: non_zero_decimal(self.avg_fill_price),
+            client_order_id: self.client_order_id,
+            symbol: self.symbol,
+            raw_event: self.raw_event,
         }
     }
 }
