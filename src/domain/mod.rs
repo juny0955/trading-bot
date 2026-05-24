@@ -1,5 +1,7 @@
+pub mod account;
 pub mod backtest;
 pub mod event;
+pub mod exchange_info;
 pub mod market_data;
 pub mod order;
 pub mod position;
