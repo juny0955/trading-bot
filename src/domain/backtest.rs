@@ -1,4 +1,3 @@
-use crate::domain::order::OrderSide;
 use rust_decimal::Decimal;
 
 #[derive(Debug, Clone)]
@@ -21,14 +20,6 @@ pub struct DepthSnapshot {
     pub ask1_price: Decimal,
     pub ask1_qty: Decimal,
     // L2~L10은 v2. v1은 L1만 사용.
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Position {
-    pub side: Option<OrderSide>,
-    pub qty: Decimal,
-    pub entry_price: Decimal,
-    pub entry_ts: i64,
 }
 
 #[derive(Debug, Clone)]

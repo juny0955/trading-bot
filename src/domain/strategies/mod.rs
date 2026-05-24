@@ -1,5 +1,6 @@
-use crate::domain::backtest::{Bar, DepthSnapshot, Position};
+use crate::domain::backtest::{Bar, DepthSnapshot};
 use crate::domain::order::{OrderRequest, OrderSide, OrderType};
+use crate::domain::position::Position;
 use crate::domain::strategies::ema_cross::EmaCross;
 use crate::domain::strategies::macd_cross::MacdCross;
 use crate::domain::strategies::rsi_bounce::RsiBounce;

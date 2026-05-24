@@ -1,5 +1,5 @@
-use crate::domain::backtest::Position;
 use crate::domain::order::{Fill, Order, OrderSide};
+use crate::domain::position::Position;
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
@@ -24,10 +24,11 @@ pub struct Portfolio {
     pub initial_equity: Decimal,
     pub equity: Decimal,
     pub(crate) position: Position,
-    pub(crate) realized_pnl: Decimal,
     pub(crate) unrealized_pnl: Decimal,
     pub(crate) fee_bps: Decimal,
     pub closed_trades: Vec<ClosedTrade>,
+    pub(crate) open_entry_ts: Option<i64>,
+    pub(crate) open_entry_fee: Option<Decimal>,
 }
 
 impl Portfolio {
@@ -36,10 +37,11 @@ impl Portfolio {
             initial_equity,
             equity: initial_equity,
             position: Position::default(),
-            realized_pnl: Decimal::zero(),
             unrealized_pnl: Decimal::zero(),
             fee_bps,
             closed_trades: Vec::new(),
+            open_entry_ts: None,
+            open_entry_fee: None,
         }
     }
 
@@ -64,19 +66,23 @@ impl Portfolio {
         self.position = Position {
             side: Some(order.side),
             qty: order.qty,
-            entry_price: price,
-            entry_ts: ts_ns,
+            avg_entry_price: price,
+            realized_pnl: self.position.realized_pnl,
         };
+        self.open_entry_ts = Some(ts_ns);
+        self.open_entry_fee = Some(fee);
         self.make_fill(order, order.qty, price, fee, ts_ns)
     }
 
     fn close_at(&mut self, order: &Order, price: Decimal, ts_ns: i64) -> Option<Fill> {
         let pos_side = self.position.side?;
         let qty = self.position.qty;
-        let entry_price = self.position.entry_price;
-        let entry_ts = self.position.entry_ts;
+        let entry_price = self.position.avg_entry_price;
+        let entry_ts = self.open_entry_ts.unwrap_or(ts_ns);
 
-        let entry_fee = self.fee_of(entry_price, qty);
+        let entry_fee = self
+            .open_entry_fee
+            .unwrap_or_else(|| self.fee_of(entry_price, qty));
         let exit_fee = self.fee_of(price, qty);
         let fees = entry_fee + exit_fee;
         let gross = match pos_side {
@@ -85,7 +91,7 @@ impl Portfolio {
         };
         let net = gross - fees;
 
-        self.realized_pnl += net;
+        self.position.realized_pnl += net;
         self.closed_trades.push(ClosedTrade {
             entry_ts_ns: entry_ts,
             exit_ts_ns: ts_ns,
@@ -98,20 +104,21 @@ impl Portfolio {
             net_pnl: net,
         });
 
-        self.position = Position::default();
+        self.position = Position {
+            realized_pnl: self.position.realized_pnl,
+            ..Position::default()
+        };
         self.unrealized_pnl = Decimal::zero();
-        self.equity = self.initial_equity + self.realized_pnl;
+        self.open_entry_ts = None;
+        self.open_entry_fee = None;
+        self.equity = self.initial_equity + self.position.realized_pnl;
 
         Some(self.make_fill(order, qty, price, exit_fee, ts_ns))
     }
 
     pub fn mark(&mut self, mark_price: Decimal) {
-        self.unrealized_pnl = match self.position.side {
-            Some(OrderSide::Buy) => (mark_price - self.position.entry_price) * self.position.qty,
-            Some(OrderSide::Sell) => (self.position.entry_price - mark_price) * self.position.qty,
-            None => Decimal::zero(),
-        };
-        self.equity = self.initial_equity + self.realized_pnl + self.unrealized_pnl;
+        self.unrealized_pnl = self.position.unrealized(mark_price);
+        self.equity = self.initial_equity + self.position.realized_pnl + self.unrealized_pnl;
     }
 
     fn make_fill(
@@ -173,7 +180,7 @@ mod tests {
         assert_eq!(t.gross_pnl, dec!(10));
         assert_eq!(t.fees, dec!(0.0840)); // (100+110)*1*4/10000
         assert_eq!(t.net_pnl, dec!(9.9160));
-        assert_eq!(p.realized_pnl, dec!(9.9160));
+        assert_eq!(p.position.realized_pnl, dec!(9.9160));
     }
 
     #[test]
@@ -207,7 +214,7 @@ mod tests {
         let fills = p.execute_simulated(&mkt(OrderSide::Sell, dec!(1)), dec!(110), 2);
         assert_eq!(fills.len(), 2); // close fill + open fill
         assert_eq!(p.position.side, Some(OrderSide::Sell));
-        assert_eq!(p.position.entry_price, dec!(110));
+        assert_eq!(p.position.avg_entry_price, dec!(110));
         assert_eq!(p.closed_trades.len(), 1);
     }
 

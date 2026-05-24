@@ -1,8 +1,8 @@
 use crate::application::backtest::portfolio::{ClosedTrade, Portfolio};
-use crate::domain::backtest::Position;
 use crate::domain::order::{
     ExchangeOpenOrder, Fill, Order, OrderError, OrderRequest, OrderSide, OrderStatus, OrderType,
 };
+use crate::domain::position::Position;
 use crate::ports::order_executor::OrderExecutor;
 use async_trait::async_trait;
 use chrono::Utc;

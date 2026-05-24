@@ -1,7 +1,8 @@
-use crate::domain::backtest::{Bar, DepthSnapshot, Position};
+use crate::domain::backtest::{Bar, DepthSnapshot};
 use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
 use crate::domain::order::OrderSide;
+use crate::domain::position::Position;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
 use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::order_service::OrderService;

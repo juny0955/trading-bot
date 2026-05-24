@@ -5,4 +5,5 @@ pub mod market_data_source;
 pub mod order_executor;
 pub mod order_repository;
 pub mod order_service;
+pub mod position_repository;
 pub mod strategy_repository;

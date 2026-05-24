@@ -1,4 +1,4 @@
-use crate::domain::backtest::Position;
+use crate::domain::position::Position;
 use crate::domain::strategies::Strategy;
 use crate::ports::market_data_provider::MarketDataProvider;
 use anyhow::Result;
