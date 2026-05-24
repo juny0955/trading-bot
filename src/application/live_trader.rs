@@ -1,3 +1,4 @@
+use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::domain::backtest::{Bar, DepthSnapshot};
 use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
@@ -33,6 +34,7 @@ use tracing::{error, info, warn};
 pub struct LiveTrader {
     order_svc: Arc<dyn OrderService>,
     position_repo: Arc<dyn PositionRepository>,
+    book_ticker_cache: Arc<BookTickerCache>,
 }
 
 impl LiveTrader {
@@ -52,10 +54,12 @@ impl LiveTrader {
     pub fn new(
         order_svc: Arc<dyn OrderService>,
         position_repo: Arc<dyn PositionRepository>,
+        book_ticker_cache: Arc<BookTickerCache>,
     ) -> Self {
         Self {
             order_svc,
             position_repo,
+            book_ticker_cache,
         }
     }
 }
@@ -77,6 +81,9 @@ impl TradingUseCase for LiveTrader {
                 _ = token.cancelled() => break,
                 event = market_rx.recv() => match event {
                     Some(e) => {
+                        if let MarketDataEvent::BookTicker(ref bt) = e {
+                            self.book_ticker_cache.update(bt.clone());
+                        }
                         process_market_event(&self.position_repo, &self.order_svc, &mut strategies, &e).await?;
                     }
                     None => {
