@@ -129,6 +129,7 @@ fn fill_from_data(order: &Order, fd: &FillData) -> Fill {
         fee: fd.fee,
         fee_asset: fd.fee_asset.clone(),
         filled_at: fd.filled_at,
+        exchange_trade_id: fd.exchange_trade_id,
     }
 }
 

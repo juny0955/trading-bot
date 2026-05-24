@@ -244,6 +244,7 @@ impl Portfolio {
             fee,
             fee_asset: FEE_ASSET.into(),
             filled_at: Utc.timestamp_nanos(ts_ns),
+            exchange_trade_id: -1,
         }
     }
 }

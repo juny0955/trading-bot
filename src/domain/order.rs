@@ -213,6 +213,7 @@ pub struct Order {
 ///     fee: dec!(0.1),
 ///     fee_asset: "USDT".into(),
 ///     filled_at: Utc::now(),
+///     exchange_trade_id: 42,
 /// };
 /// assert_eq!(fill.qty, dec!(1));
 /// ```
@@ -227,6 +228,8 @@ pub struct Fill {
     pub fee: Decimal,
     pub fee_asset: String,
     pub filled_at: DateTime<Utc>,
+    /// Binance trade ID (`t` field). -1 이면 non-TRADE 이벤트.
+    pub exchange_trade_id: i64,
 }
 
 /// 새 주문을 만들기 위한 요청 값입니다.

@@ -309,6 +309,7 @@ mod tests {
             fee,
             fee_asset: "USDT".into(),
             filled_at: Utc::now(),
+            exchange_trade_id: -1,
         }
     }
 

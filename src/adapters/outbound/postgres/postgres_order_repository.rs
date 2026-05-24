@@ -67,6 +67,7 @@ struct DbFill {
     fee: Decimal,
     fee_asset: String,
     filled_at: DateTime<Utc>,
+    exchange_trade_id: Option<i64>,
 }
 
 impl From<DbFill> for Fill {
@@ -81,6 +82,7 @@ impl From<DbFill> for Fill {
             fee: db.fee,
             fee_asset: db.fee_asset,
             filled_at: db.filled_at,
+            exchange_trade_id: db.exchange_trade_id.unwrap_or(-1),
         }
     }
 }
@@ -193,9 +195,11 @@ impl PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO fills (
-                order_id, strategy_instance_id, symbol, side, qty, price, fee, fee_asset, filled_at
+                order_id, strategy_instance_id, symbol, side, qty, price, fee, fee_asset, filled_at, exchange_trade_id
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (order_id, exchange_trade_id)
+            WHERE exchange_trade_id IS NOT NULL DO NOTHING
             "#,
         )
         .bind(fill.order_id)
@@ -207,6 +211,7 @@ impl PostgresOrderRepository {
         .bind(fill.fee)
         .bind(&fill.fee_asset)
         .bind(fill.filled_at)
+        .bind(if fill.exchange_trade_id >= 0 { Some(fill.exchange_trade_id) } else { None })
         .execute(&self.pool)
         .await?;
         Ok(())

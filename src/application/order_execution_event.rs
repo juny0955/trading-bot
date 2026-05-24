@@ -55,4 +55,5 @@ pub struct FillData {
     pub fee: Decimal,
     pub fee_asset: String,
     pub filled_at: DateTime<Utc>,
+    pub exchange_trade_id: i64,
 }

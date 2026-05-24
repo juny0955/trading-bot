@@ -48,6 +48,7 @@ pub struct BinanceOrderTradeUpdate {
     pub trade_time_ms: i64,
     pub cumulative_filled_qty: Decimal,
     pub avg_fill_price: Decimal,
+    pub trade_id: i64,
 }
 
 impl BinanceOrderTradeUpdate {
@@ -78,6 +79,7 @@ impl BinanceOrderTradeUpdate {
             trade_time_ms: o["T"].as_i64().unwrap_or_default(),
             cumulative_filled_qty: decimal_or_zero(o, "z", "o.z")?,
             avg_fill_price: decimal_or_zero(o, "ap", "o.ap")?,
+            trade_id: o["t"].as_i64().unwrap_or(-1),
         })
     }
 
@@ -151,6 +153,7 @@ fn fill_data(update: &BinanceOrderTradeUpdate) -> Option<FillData> {
         fee: update.fee,
         fee_asset: update.fee_asset.clone(),
         filled_at: trade_time(update.trade_time_ms),
+        exchange_trade_id: update.trade_id,
     })
 }
 
