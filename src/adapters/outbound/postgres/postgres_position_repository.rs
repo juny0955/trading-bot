@@ -7,11 +7,33 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 
+/// PostgreSQL 기반 포지션 저장소입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use sqlx::PgPool;
+/// # use trading_bot::adapters::outbound::postgres::postgres_position_repository::PostgresPositionRepository;
+/// # fn example(pool: PgPool) {
+/// let repo = PostgresPositionRepository::new(pool);
+/// # }
+/// ```
 pub struct PostgresPositionRepository {
     pool: PgPool,
 }
 
 impl PostgresPositionRepository {
+    /// 새 PostgreSQL 포지션 저장소를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use sqlx::PgPool;
+    /// # use trading_bot::adapters::outbound::postgres::postgres_position_repository::PostgresPositionRepository;
+    /// # fn example(pool: PgPool) {
+    /// let repo = PostgresPositionRepository::new(pool);
+    /// # }
+    /// ```
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }

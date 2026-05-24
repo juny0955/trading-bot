@@ -14,11 +14,33 @@ use tracing::{error, info, warn};
 
 const URL: &str = "https://api.alternative.me/fng/";
 
+/// Alternative.me 공포탐욕지수 provider입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use trading_bot::adapters::inbound::alternative::alternative_fng_provider::AlternativeFngProvider;
+/// # use trading_bot::config::AlternativeRuntimeConfig;
+/// # fn example(cfg: AlternativeRuntimeConfig) {
+/// let provider = AlternativeFngProvider::new(cfg);
+/// # }
+/// ```
 pub struct AlternativeFngProvider {
     cfg: AlternativeRuntimeConfig,
 }
 
 impl AlternativeFngProvider {
+    /// 새 Alternative.me provider를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use trading_bot::adapters::inbound::alternative::alternative_fng_provider::AlternativeFngProvider;
+    /// # use trading_bot::config::AlternativeRuntimeConfig;
+    /// # fn example(cfg: AlternativeRuntimeConfig) {
+    /// let provider = AlternativeFngProvider::new(cfg);
+    /// # }
+    /// ```
     pub fn new(cfg: AlternativeRuntimeConfig) -> Self {
         Self { cfg }
     }
@@ -60,6 +82,23 @@ impl FngProvider for AlternativeFngProvider {
     }
 }
 
+/// Alternative.me API를 주기적으로 polling하고 watch channel로 전달합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use tokio::sync::watch;
+/// # use tokio_util::sync::CancellationToken;
+/// # use trading_bot::config::AlternativeRuntimeConfig;
+/// # async fn example(cfg: AlternativeRuntimeConfig) {
+/// let (tx, _rx) = watch::channel(None);
+/// trading_bot::adapters::inbound::alternative::alternative_fng_provider::fetch_alternative_fng(
+///     cfg,
+///     tx,
+///     CancellationToken::new(),
+/// ).await;
+/// # }
+/// ```
 pub async fn fetch_alternative_fng(
     cfg: AlternativeRuntimeConfig,
     tx: Sender<Option<FngData>>,

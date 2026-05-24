@@ -50,7 +50,9 @@ impl WsSession for UserStreamSession {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
-                    let _ = write.send(Message::Close(None)).await;
+                    if let Err(e) = write.send(Message::Close(None)).await {
+                        warn!(error = %e, "User WS Close Frame 전송 실패");
+                    }
                     info!("User WS Close Frame 전송 후 종료");
                     return Ok(());
                 }
@@ -98,6 +100,18 @@ impl WsSession for UserStreamSession {
 }
 
 impl BinanceUserStreamHandler {
+    /// 새 Binance user stream handler를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use std::sync::Arc;
+    /// # use trading_bot::adapters::binance::api::BinanceOrderApi;
+    /// # use trading_bot::adapters::inbound::binance::user_stream::BinanceUserStreamHandler;
+    /// # fn example(api: Arc<BinanceOrderApi>) {
+    /// let handler = BinanceUserStreamHandler::new(api);
+    /// # }
+    /// ```
     pub fn new(api: Arc<BinanceOrderApi>) -> Self {
         Self { api }
     }

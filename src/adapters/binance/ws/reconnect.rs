@@ -4,6 +4,16 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+/// WebSocket 세션 실행 결과의 재연결 정책을 표현합니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::adapters::binance::ws::reconnect::WsError;
+///
+/// let err = WsError::retryable(anyhow::anyhow!("temporary"));
+/// assert!(err.to_string().contains("retryable"));
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum WsError {
     #[error("retryable: {0:#}")]
@@ -13,14 +23,45 @@ pub enum WsError {
 }
 
 impl WsError {
+    /// 재시도 가능한 WebSocket 오류를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::adapters::binance::ws::reconnect::WsError;
+    ///
+    /// let err = WsError::retryable(anyhow::anyhow!("timeout"));
+    /// assert!(err.to_string().contains("retryable"));
+    /// ```
     pub fn retryable(e: impl Into<anyhow::Error>) -> Self {
         Self::Retryable(e.into())
     }
+
+    /// 재시도하지 않을 WebSocket 오류를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::adapters::binance::ws::reconnect::WsError;
+    ///
+    /// let err = WsError::fatal(anyhow::anyhow!("auth"));
+    /// assert!(err.to_string().contains("fatal"));
+    /// ```
     pub fn fatal(e: impl Into<anyhow::Error>) -> Self {
         Self::Fatal(e.into())
     }
 }
 
+/// WebSocket 재연결 backoff 설정입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::adapters::binance::ws::reconnect::ReconnectConfig;
+///
+/// let cfg = ReconnectConfig::defaults("market");
+/// assert_eq!(cfg.label, "market");
+/// ```
 pub struct ReconnectConfig {
     pub label: String,
     pub initial_delay: Duration,
@@ -30,6 +71,16 @@ pub struct ReconnectConfig {
 }
 
 impl ReconnectConfig {
+    /// 기본 재연결 설정을 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::adapters::binance::ws::reconnect::ReconnectConfig;
+    ///
+    /// let cfg = ReconnectConfig::defaults("user");
+    /// assert!(cfg.max_retries.is_none());
+    /// ```
     pub fn defaults(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -41,12 +92,41 @@ impl ReconnectConfig {
     }
 }
 
+/// 재연결 루프에서 실행할 WebSocket 세션 인터페이스입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use async_trait::async_trait;
+/// # use tokio_util::sync::CancellationToken;
+/// # use trading_bot::adapters::binance::ws::reconnect::{WsError, WsSession};
+/// struct Session;
+///
+/// #[async_trait]
+/// impl WsSession for Session {
+///     async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
+///         Ok(())
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait WsSession: Send {
     async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError>;
     async fn on_disconnect(&mut self) {}
 }
 
+/// `WsSession`을 재연결 정책에 따라 반복 실행합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # async fn example(session: impl trading_bot::adapters::binance::ws::reconnect::WsSession) {
+/// use tokio_util::sync::CancellationToken;
+/// use trading_bot::adapters::binance::ws::reconnect::{ReconnectConfig, run_with_reconnect};
+///
+/// run_with_reconnect(session, ReconnectConfig::defaults("ws"), CancellationToken::new()).await;
+/// # }
+/// ```
 pub async fn run_with_reconnect<S: WsSession>(
     mut session: S,
     cfg: ReconnectConfig,

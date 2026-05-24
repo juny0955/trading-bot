@@ -86,6 +86,17 @@ impl From<DbFill> for Fill {
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
+/// PostgreSQL 기반 주문/체결 저장소입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use sqlx::PgPool;
+/// # use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
+/// # fn example(pool: PgPool) {
+/// let repo = PostgresOrderRepository::new(pool);
+/// # }
+/// ```
 pub struct PostgresOrderRepository {
     pool: PgPool,
 }
@@ -117,6 +128,17 @@ impl OrderRepository for PostgresOrderRepository {
 }
 
 impl PostgresOrderRepository {
+    /// 새 PostgreSQL 주문 저장소를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use sqlx::PgPool;
+    /// # use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
+    /// # fn example(pool: PgPool) {
+    /// let repo = PostgresOrderRepository::new(pool);
+    /// # }
+    /// ```
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }

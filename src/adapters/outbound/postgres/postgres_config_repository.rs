@@ -7,6 +7,17 @@ use anyhow::{Result, bail};
 use async_trait::async_trait;
 use sqlx::{PgPool, query};
 
+/// PostgreSQL에서 애플리케이션 설정을 읽는 저장소입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use sqlx::PgPool;
+/// # use trading_bot::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
+/// # fn example(pool: PgPool) {
+/// let repo = PostgresConfigRepository::new(pool);
+/// # }
+/// ```
 pub struct PostgresConfigRepository {
     pool: PgPool,
 }
@@ -19,10 +30,30 @@ impl ConfigRepository for PostgresConfigRepository {
 }
 
 impl PostgresConfigRepository {
+    /// 새 PostgreSQL 설정 저장소를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use sqlx::PgPool;
+    /// # use trading_bot::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
+    /// # fn example(pool: PgPool) {
+    /// let repo = PostgresConfigRepository::new(pool);
+    /// # }
+    /// ```
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
+    /// DB rows와 환경 변수에서 전체 앱 설정을 로드합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # async fn example(pool: &sqlx::PgPool) -> anyhow::Result<()> {
+    /// let cfg = trading_bot::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository::load_config(pool).await?;
+    /// # Ok(()) }
+    /// ```
     pub async fn load_config(pool: &PgPool) -> Result<AppConfig> {
         let binance_net = match std::env::var("BINANCE_NET").as_deref() {
             Ok("testnet") => BinanceNet::Testnet,

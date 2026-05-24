@@ -27,6 +27,17 @@ pub struct BinanceMarketProvider {
 }
 
 impl BinanceMarketProvider {
+    /// 새 Binance 시장 데이터 provider를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use trading_bot::adapters::inbound::binance::binance_market_provider::BinanceMarketProvider;
+    /// # use trading_bot::config::{BinanceRuntimeConfig, binance_config::BinanceConfig};
+    /// # fn example(cfg: BinanceConfig, runtime_cfg: BinanceRuntimeConfig) {
+    /// let provider = BinanceMarketProvider::new(cfg, runtime_cfg);
+    /// # }
+    /// ```
     pub fn new(cfg: BinanceConfig, runtime_cfg: BinanceRuntimeConfig) -> Self {
         Self { cfg, runtime_cfg }
     }
@@ -151,7 +162,9 @@ async fn stream(
     loop {
         tokio::select! {
             _ = token.cancelled() => {
-                let _ = write.send(Message::Close(None)).await;
+                if let Err(e) = write.send(Message::Close(None)).await {
+                    warn!(stream_type = %stream_type, error = %e, "Binance WS Close Frame 전송 실패");
+                }
                 info!(stream_type = %stream_type, "Binance WS Close Frame 전송 후 종료");
                 return Ok(());
             }

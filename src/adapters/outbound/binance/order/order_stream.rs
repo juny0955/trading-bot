@@ -37,7 +37,9 @@ impl WsSession for OrderStreamSession {
         loop {
             tokio::select! {
                 _ = token.cancelled() => {
-                    let _ = write.send(Message::Close(None)).await;
+                    if let Err(e) = write.send(Message::Close(None)).await {
+                        warn!(error = %e, "Order WS Close Frame 전송 실패");
+                    }
                     info!("Order WS Close Frame 전송 후 종료");
                     return Ok(());
                 }
@@ -48,11 +50,7 @@ impl WsSession for OrderStreamSession {
                 msg = time::timeout(Duration::from_secs(240), read.next()) => {
                     match msg {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            if let Ok(val) = serde_json::from_str::<Value>(&text)
-                            && let Some(id) = val["id"].as_str()
-                            && let Some(tx) = self.api.pending.lock().await.remove(id) {
-                                let _ = tx.send(val);
-                            }
+                            route_order_response(&self.api, &text).await;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             write.send(Message::Pong(payload)).await.map_err(WsError::retryable)?;
@@ -77,7 +75,35 @@ impl WsSession for OrderStreamSession {
     }
 }
 
+async fn route_order_response(api: &BinanceOrderApi, text: &str) {
+    let Ok(val) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let Some(id) = val["id"].as_str().map(str::to_string) else {
+        return;
+    };
+    let Some(tx) = api.pending.lock().await.remove(&id) else {
+        return;
+    };
+
+    if tx.send(val).is_err() {
+        warn!(id = %id, "Order WS 응답 수신자가 이미 닫힘");
+    }
+}
+
 impl OrderWsLoop {
+    /// 새 주문 WebSocket 루프를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use std::sync::Arc;
+    /// # use trading_bot::adapters::binance::api::BinanceOrderApi;
+    /// # use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
+    /// # fn example(api: Arc<BinanceOrderApi>) {
+    /// let loop_runner = OrderWsLoop::new(api);
+    /// # }
+    /// ```
     pub fn new(api: Arc<BinanceOrderApi>) -> Self {
         Self { api }
     }

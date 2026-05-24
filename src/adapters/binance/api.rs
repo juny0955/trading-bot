@@ -11,6 +11,16 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time;
 use tracing::{error, warn};
 
+/// Binance 주문 API 통신 중 발생하는 오류입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::adapters::binance::api::BinanceApiError;
+///
+/// let err = BinanceApiError::Timeout;
+/// assert_eq!(err.to_string(), "timeout");
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum BinanceApiError {
     #[error("주문 거부: code={code} msg={msg}")]
@@ -36,6 +46,17 @@ impl From<BinanceApiError> for OrderError {
     }
 }
 
+/// Binance 주문 WebSocket/REST API 클라이언트입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use trading_bot::adapters::binance::api::BinanceOrderApi;
+/// # use trading_bot::config::binance_config::BinanceConfig;
+/// # fn example(cfg: &BinanceConfig) -> anyhow::Result<()> {
+/// let (api, ws_rx) = BinanceOrderApi::new("key".into(), "secret".into(), cfg)?;
+/// # Ok(()) }
+/// ```
 pub struct BinanceOrderApi {
     pub(crate) api_key: String,
     pub(crate) secret: String,
@@ -48,6 +69,17 @@ pub struct BinanceOrderApi {
 }
 
 impl BinanceOrderApi {
+    /// Binance 주문 API 클라이언트와 outbound WS 송신 채널을 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use trading_bot::adapters::binance::api::BinanceOrderApi;
+    /// # use trading_bot::config::binance_config::BinanceConfig;
+    /// # fn example(cfg: &BinanceConfig) -> anyhow::Result<()> {
+    /// let (api, ws_rx) = BinanceOrderApi::new("key".into(), "secret".into(), cfg)?;
+    /// # Ok(()) }
+    /// ```
     pub fn new(
         api_key: String,
         secret: String,

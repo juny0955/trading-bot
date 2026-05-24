@@ -60,12 +60,34 @@ const ASK_QTY_COLS: [&str; 10] = [
     "ask10_qty",
 ];
 
+/// QuestDB line protocol writer sink입니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use trading_bot::adapters::outbound::questdb::writer::QuestDbSink;
+/// # use trading_bot::config::QuestDbRuntimeConfig;
+/// # fn example(cfg: QuestDbRuntimeConfig) {
+/// let sink = QuestDbSink::new("http::addr=localhost:9009;".into(), cfg);
+/// # }
+/// ```
 pub struct QuestDbSink {
     url: String,
     cfg: QuestDbRuntimeConfig,
 }
 
 impl QuestDbSink {
+    /// 새 QuestDB sink를 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// # use trading_bot::adapters::outbound::questdb::writer::QuestDbSink;
+    /// # use trading_bot::config::QuestDbRuntimeConfig;
+    /// # fn example(cfg: QuestDbRuntimeConfig) {
+    /// let sink = QuestDbSink::new("http::addr=localhost:9009;".into(), cfg);
+    /// # }
+    /// ```
     pub fn new(url: String, cfg: QuestDbRuntimeConfig) -> Self {
         Self { url, cfg }
     }
@@ -78,6 +100,24 @@ impl MarketDataSink for QuestDbSink {
     }
 }
 
+/// QuestDB writer loop를 실행합니다.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use tokio::sync::mpsc;
+/// # use tokio_util::sync::CancellationToken;
+/// # use trading_bot::config::QuestDbRuntimeConfig;
+/// # async fn example(cfg: QuestDbRuntimeConfig) {
+/// let (_tx, rx) = mpsc::channel(16);
+/// trading_bot::adapters::outbound::questdb::writer::run(
+///     "http::addr=localhost:9009;",
+///     cfg,
+///     rx,
+///     CancellationToken::new(),
+/// ).await;
+/// # }
+/// ```
 pub async fn run(
     url: &str,
     cfg: QuestDbRuntimeConfig,
