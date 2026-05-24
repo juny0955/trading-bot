@@ -95,7 +95,10 @@ impl PositionRepository for PostgresPositionRepository {
             .map(StoredPosition::from)
             .unwrap_or_else(|| StoredPosition::flat(instance_id, fill.symbol.clone()));
 
-        let next_core = cur.position.apply(fill);
+        let next_core = cur
+            .position
+            .apply(fill)
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
         let next = StoredPosition {
             strategy_instance_id: cur.strategy_instance_id,
             symbol: cur.symbol,

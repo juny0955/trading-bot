@@ -116,7 +116,7 @@ impl OrderExecutor for BacktestOrderExecutor {
                 request.order_type
             )));
         }
-        let mut order = Order::new_from_request(request);
+        let mut order = Order::new_from_request(request)?;
         let mut st = self.state.lock().unwrap();
         st.next_exchange_order_id += 1;
         order.exchange_order_id = Some(st.next_exchange_order_id);

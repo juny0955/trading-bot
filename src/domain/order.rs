@@ -3,6 +3,16 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// 주문 실행 방식입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::OrderType;
+///
+/// let order_type = OrderType::Market;
+/// assert_eq!(format!("{order_type:?}"), "Market");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum OrderType {
     #[default]
@@ -12,6 +22,16 @@ pub enum OrderType {
     StopLimit,
 }
 
+/// 주문 방향입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::OrderSide;
+///
+/// let side = OrderSide::Buy;
+/// assert_eq!(side, OrderSide::Buy);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum OrderSide {
     #[default]
@@ -19,6 +39,16 @@ pub enum OrderSide {
     Sell,
 }
 
+/// 주문의 수명주기 상태입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::OrderStatus;
+///
+/// assert!(OrderStatus::Filled.is_terminal());
+/// assert!(!OrderStatus::New.is_terminal());
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
     New,
@@ -29,6 +59,18 @@ pub enum OrderStatus {
     Expired,
 }
 
+/// 허용되지 않는 주문 상태 전이를 나타냅니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::OrderStatus;
+///
+/// let err = OrderStatus::Filled
+///     .can_transition_to(OrderStatus::New)
+///     .unwrap_err();
+/// assert_eq!(err.from, OrderStatus::Filled);
+/// ```
 #[derive(Debug, thiserror::Error)]
 #[error("invalid transition: {from:?} → {to:?}")]
 pub struct InvalidTransition {
@@ -37,6 +79,15 @@ pub struct InvalidTransition {
 }
 
 impl OrderStatus {
+    /// 더 이상 일반적인 주문 진행이 없는 최종 상태인지 반환합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::domain::order::OrderStatus;
+    ///
+    /// assert!(OrderStatus::Cancelled.is_terminal());
+    /// ```
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -44,6 +95,17 @@ impl OrderStatus {
         )
     }
 
+    /// 현재 상태에서 다음 상태로 전이할 수 있는지 검증합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::domain::order::OrderStatus;
+    ///
+    /// assert!(OrderStatus::New
+    ///     .can_transition_to(OrderStatus::PartiallyFilled)
+    ///     .is_ok());
+    /// ```
     pub fn can_transition_to(self, next: OrderStatus) -> Result<(), InvalidTransition> {
         use OrderStatus::*;
         let ok = match (self, next) {
@@ -65,6 +127,16 @@ impl OrderStatus {
     }
 }
 
+/// 지정가 주문의 체결 조건입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::TimeInForce;
+///
+/// let tif = TimeInForce::Gtc;
+/// assert_eq!(format!("{tif:?}"), "Gtc");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TimeInForce {
     #[default]
@@ -73,6 +145,24 @@ pub enum TimeInForce {
     Fok,
 }
 
+/// 시스템 내부에서 추적하는 주문입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::order::{Order, OrderRequest, OrderSide, OrderType};
+///
+/// let order = Order::new_from_request(OrderRequest {
+///     symbol: "BTCUSDT".into(),
+///     order_type: OrderType::Market,
+///     side: OrderSide::Buy,
+///     qty: dec!(1),
+///     ..Default::default()
+/// }).unwrap();
+///
+/// assert_eq!(order.symbol, "BTCUSDT");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: Uuid,
@@ -95,6 +185,29 @@ pub struct Order {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 체결 내역입니다.
+///
+/// # Examples
+///
+/// ```
+/// use chrono::Utc;
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::order::{Fill, OrderSide};
+/// use uuid::Uuid;
+///
+/// let fill = Fill {
+///     order_id: Uuid::nil(),
+///     strategy_instance_id: 1,
+///     symbol: "BTCUSDT".into(),
+///     side: OrderSide::Buy,
+///     qty: dec!(1),
+///     price: dec!(100),
+///     fee: dec!(0.1),
+///     fee_asset: "USDT".into(),
+///     filled_at: Utc::now(),
+/// };
+/// assert_eq!(fill.qty, dec!(1));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill {
     pub order_id: Uuid,
@@ -108,6 +221,23 @@ pub struct Fill {
     pub filled_at: DateTime<Utc>,
 }
 
+/// 새 주문을 만들기 위한 요청 값입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::order::{OrderRequest, OrderSide, OrderType};
+///
+/// let request = OrderRequest {
+///     symbol: "BTCUSDT".into(),
+///     order_type: OrderType::Market,
+///     side: OrderSide::Sell,
+///     qty: dec!(0.5),
+///     ..Default::default()
+/// };
+/// assert_eq!(request.symbol, "BTCUSDT");
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct OrderRequest {
     pub strategy_instance_id: i64,
@@ -123,6 +253,26 @@ pub struct OrderRequest {
     pub post_only: bool,
 }
 
+/// 거래소에 열려 있는 주문을 표현하는 조회 결과입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::order::{ExchangeOpenOrder, OrderSide};
+///
+/// let open = ExchangeOpenOrder {
+///     exchange_order_id: 1,
+///     client_order_id: "client-1".into(),
+///     symbol: "BTCUSDT".into(),
+///     side: OrderSide::Buy,
+///     orig_qty: dec!(1),
+///     executed_qty: dec!(0),
+///     price: None,
+///     status: "NEW".into(),
+/// };
+/// assert_eq!(open.exchange_order_id, 1);
+/// ```
 #[derive(Debug, Clone)]
 pub struct ExchangeOpenOrder {
     pub exchange_order_id: i64,
@@ -135,6 +285,16 @@ pub struct ExchangeOpenOrder {
     pub status: String,
 }
 
+/// 주문 처리 중 발생할 수 있는 오류입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::order::OrderError;
+///
+/// let err = OrderError::InvalidRequest("symbol is required".into());
+/// assert!(err.to_string().contains("잘못된 요청"));
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum OrderError {
     #[error("주문 없음: {0}")]
@@ -154,17 +314,39 @@ pub enum OrderError {
 }
 
 impl Order {
-    pub fn new_from_request(req: OrderRequest) -> Self {
+    /// 주문 요청을 검증하고 새 주문을 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::domain::order::{Order, OrderRequest, OrderSide, OrderType};
+    ///
+    /// let order = Order::new_from_request(OrderRequest {
+    ///     symbol: "ETHUSDT".into(),
+    ///     order_type: OrderType::Market,
+    ///     side: OrderSide::Buy,
+    ///     qty: dec!(2),
+    ///     ..Default::default()
+    /// }).unwrap();
+    ///
+    /// assert_eq!(order.filled_qty, dec!(0));
+    /// ```
+    pub fn new_from_request(req: OrderRequest) -> Result<Self, OrderError> {
+        validate_request(&req)?;
         let now = Utc::now();
         let id = Uuid::now_v7();
-        let client_order_id = req.client_order_id.unwrap_or_else(|| id.to_string());
+        let client_order_id = req
+            .client_order_id
+            .clone()
+            .unwrap_or_else(|| id.to_string());
 
-        Self {
+        Ok(Self {
             id,
             client_order_id,
             exchange_order_id: None,
             strategy_instance_id: req.strategy_instance_id,
-            symbol: req.symbol,
+            symbol: req.symbol.trim().to_string(),
             order_type: req.order_type,
             side: req.side,
             status: OrderStatus::New,
@@ -178,8 +360,47 @@ impl Order {
             post_only: req.post_only,
             created_at: now,
             updated_at: now,
+        })
+    }
+}
+
+fn validate_request(req: &OrderRequest) -> Result<(), OrderError> {
+    validate_symbol(&req.symbol)?;
+    validate_positive("qty", req.qty)?;
+    validate_order_type_prices(req)
+}
+
+fn validate_symbol(symbol: &str) -> Result<(), OrderError> {
+    if symbol.trim().is_empty() {
+        return Err(OrderError::InvalidRequest("symbol is required".into()));
+    }
+    Ok(())
+}
+
+fn validate_order_type_prices(req: &OrderRequest) -> Result<(), OrderError> {
+    match req.order_type {
+        OrderType::Market => Ok(()),
+        OrderType::Limit => validate_required_positive("price", req.price),
+        OrderType::StopMarket => validate_required_positive("stop_price", req.stop_price),
+        OrderType::StopLimit => {
+            validate_required_positive("price", req.price)?;
+            validate_required_positive("stop_price", req.stop_price)
         }
     }
+}
+
+fn validate_required_positive(name: &str, value: Option<Decimal>) -> Result<(), OrderError> {
+    let value = value.ok_or_else(|| OrderError::InvalidRequest(format!("{name} is required")))?;
+    validate_positive(name, value)
+}
+
+fn validate_positive(name: &str, value: Decimal) -> Result<(), OrderError> {
+    if value <= Decimal::ZERO {
+        return Err(OrderError::InvalidRequest(format!(
+            "{name} must be positive"
+        )));
+    }
+    Ok(())
 }
 
 impl TryFrom<&Order> for ExchangeOpenOrder {
@@ -198,5 +419,47 @@ impl TryFrom<&Order> for ExchangeOpenOrder {
             price: o.price,
             status: format!("{:?}", o.status),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use rust_decimal_macros::dec;
+
+    fn market_request() -> OrderRequest {
+        OrderRequest {
+            symbol: "BTCUSDT".into(),
+            order_type: OrderType::Market,
+            side: OrderSide::Buy,
+            qty: dec!(1),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn new_from_request_rejects_invalid_business_inputs() -> Result<()> {
+        let invalid_requests = [
+            OrderRequest {
+                symbol: " ".into(),
+                ..market_request()
+            },
+            OrderRequest {
+                qty: Decimal::ZERO,
+                ..market_request()
+            },
+            OrderRequest {
+                order_type: OrderType::Limit,
+                price: None,
+                ..market_request()
+            },
+        ];
+
+        assert!(invalid_requests.into_iter().all(|req| matches!(
+            Order::new_from_request(req),
+            Err(OrderError::InvalidRequest(_))
+        )));
+        Ok(())
     }
 }

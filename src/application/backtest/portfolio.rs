@@ -165,6 +165,7 @@ mod tests {
             qty,
             ..Default::default()
         })
+        .unwrap()
     }
 
     #[test]

@@ -44,8 +44,8 @@ impl StrategyRepository for PostgresStrategyRepository {
                        si.strategy_type,
                        si.name,
                        si.params,
-                       array_agg(sis.symbol ORDER BY sis.symbol() as symbols)
-                FROM strategy_instance si
+                       array_agg(sis.symbol ORDER BY sis.symbol) AS symbols
+                FROM strategy_instances si
                 JOIN strategy_instance_symbols sis ON sis.strategy_instance_id = si.id
                 WHERE si.enabled = TRUE AND sis.enabled = TRUE
                 GROUP BY si.id

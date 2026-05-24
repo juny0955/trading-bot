@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
             let cfg = base_cfg.clone();
             tokio::spawn(async move {
                 let strategy = create_strategy(&spec.name, &spec.params)?;
-                let result = engine::run_on_events(events, cfg, strategy).await;
+                let result = engine::run_on_events(events, cfg, strategy).await?;
                 anyhow::Ok((i, spec, result))
             })
         })

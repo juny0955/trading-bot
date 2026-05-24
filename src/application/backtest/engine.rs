@@ -61,14 +61,14 @@ async fn run_inner(
     events: &[Event],
     cfg: &BacktestConfig,
     strategy: &mut dyn Strategy,
-) -> BacktestResult {
+) -> Result<BacktestResult> {
     let executor = Arc::new(BacktestOrderExecutor::new(cfg.initial_equity, cfg.fee_bps));
 
     if events.is_empty() {
-        return BacktestResult {
+        return Ok(BacktestResult {
             portfolio: executor.snapshot(),
             equity_curve: Vec::new(),
-        };
+        });
     }
 
     let mut equity_curve = Vec::with_capacity(events.len());
@@ -77,7 +77,7 @@ async fn run_inner(
 
     {
         let ctx = make_ctx(&executor, events[0].ts_ns());
-        let cmds = strategy.on_start(&ctx);
+        let cmds = strategy.on_start(&ctx)?;
         dispatch(&executor, cmds).await;
     }
 
@@ -98,10 +98,10 @@ async fn run_inner(
 
         let ctx = make_ctx(&executor, ts);
         let cmds = match ev {
-            Event::Bar(b) => strategy.on_bar(b, &ctx),
+            Event::Bar(b) => strategy.on_bar(b, &ctx)?,
             Event::Depth(d) => {
                 last_depth = Some(d);
-                strategy.on_depth(d, &ctx)
+                strategy.on_depth(d, &ctx)?
             }
         };
         dispatch(&executor, cmds).await;
@@ -136,14 +136,14 @@ async fn run_inner(
     {
         let last = events.last().unwrap().ts_ns();
         let ctx = make_ctx(&executor, last);
-        let cmds = strategy.on_finish(&ctx);
+        let cmds = strategy.on_finish(&ctx)?;
         dispatch(&executor, cmds).await;
     }
 
-    BacktestResult {
+    Ok(BacktestResult {
         portfolio: executor.snapshot(),
         equity_curve,
-    }
+    })
 }
 
 pub async fn run(
@@ -152,14 +152,14 @@ pub async fn run(
     strategy: &mut dyn Strategy,
 ) -> Result<BacktestResult> {
     let events = fetch_events(src, &cfg).await?;
-    Ok(run_inner(&events, &cfg, strategy).await)
+    run_inner(&events, &cfg, strategy).await
 }
 
 pub async fn run_on_events(
     events: Arc<Vec<Event>>,
     cfg: BacktestConfig,
     mut strategy: Box<dyn Strategy>,
-) -> BacktestResult {
+) -> Result<BacktestResult> {
     run_inner(&events, &cfg, strategy.as_mut()).await
 }
 

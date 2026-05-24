@@ -30,18 +30,18 @@ struct BuyAndHold {
 }
 
 impl Strategy for BuyAndHold {
-    fn on_bar(&mut self, bar: &Bar, _ctx: &Context) -> Vec<StrategyCommand> {
+    fn on_bar(&mut self, bar: &Bar, _ctx: &Context) -> Result<Vec<StrategyCommand>> {
         if !self.fired {
             self.fired = true;
-            return vec![StrategyCommand::SubmitOrder(OrderRequest {
+            return Ok(vec![StrategyCommand::SubmitOrder(OrderRequest {
                 symbol: bar.symbol.clone(),
                 order_type: OrderType::Market,
                 side: OrderSide::Buy,
                 qty: self.qty,
                 ..Default::default()
-            })];
+            })]);
         }
-        vec![]
+        Ok(vec![])
     }
 }
 

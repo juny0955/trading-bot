@@ -33,7 +33,7 @@ impl BinanceOrderExecutor {
 #[async_trait]
 impl OrderExecutor for BinanceOrderExecutor {
     async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
-        let order = Order::new_from_request(request.clone());
+        let order = Order::new_from_request(request.clone())?;
         let id = order.id.to_string();
         let ts = signing::timestamp_ms();
         let side = format!("{:?}", request.side).to_uppercase();
