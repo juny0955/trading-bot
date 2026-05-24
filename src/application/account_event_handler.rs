@@ -74,6 +74,14 @@ impl AccountEventHandler {
 
     async fn handle(&self, event: OrderExecutionEvent) {
         let Some(order) = self.find_order(event.exchange_order_id).await else {
+            let raw = serde_json::json!({
+                "exchange_order_id": event.exchange_order_id,
+                "new_status": event.new_status.map(|s| format!("{s:?}")),
+                "cumulative_filled_qty": event.cumulative_filled_qty.to_string(),
+            });
+            if let Err(e) = self.repo.record_orphan(event.exchange_order_id, raw).await {
+                error!(error = %e, "orphan 주문 저장 실패");
+            }
             return;
         };
 

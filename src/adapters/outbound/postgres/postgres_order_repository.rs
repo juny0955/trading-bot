@@ -4,6 +4,7 @@ use crate::ports::order_repository::{OrderRepository, RepositoryError};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -131,6 +132,21 @@ impl OrderRepository for PostgresOrderRepository {
 
     async fn find_by_status(&self, status: OrderStatus) -> Result<Vec<Order>, RepositoryError> {
         Self::find_by_status(self, status).await
+    }
+
+    async fn record_orphan(&self, exchange_order_id: i64, raw: Value) -> Result<(), RepositoryError> {
+        sqlx::query(
+            r#"
+            INSERT INTO orphan_orders (exchange_order_id, raw)
+            VALUES ($1, $2)
+            ON CONFLICT (exchange_order_id) DO NOTHING
+            "#,
+        )
+        .bind(exchange_order_id)
+        .bind(raw)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 

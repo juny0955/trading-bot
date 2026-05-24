@@ -1,5 +1,6 @@
 use crate::domain::order::{Fill, Order, OrderError, OrderStatus};
 use async_trait::async_trait;
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -28,4 +29,7 @@ pub trait OrderRepository: Send + Sync {
     async fn find_by_exchange_id(&self, exchange_id: i64)
     -> Result<Option<Order>, RepositoryError>;
     async fn find_by_status(&self, status: OrderStatus) -> Result<Vec<Order>, RepositoryError>;
+    /// DB에 없는 ORDER_TRADE_UPDATE를 orphan_orders 테이블에 기록한다.
+    async fn record_orphan(&self, exchange_order_id: i64, raw: Value)
+    -> Result<(), RepositoryError>;
 }
