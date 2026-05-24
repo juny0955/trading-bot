@@ -87,6 +87,7 @@ impl sqlx::Type<Postgres> for OrderStatus {
 impl<'r> sqlx::Decode<'r, Postgres> for OrderStatus {
     fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
         match <&str as sqlx::Decode<Postgres>>::decode(value)? {
+            "pending_submit" => Ok(Self::PendingSubmit),
             "new" => Ok(Self::New),
             "partially_filled" => Ok(Self::PartiallyFilled),
             "filled" => Ok(Self::Filled),
@@ -100,6 +101,7 @@ impl<'r> sqlx::Decode<'r, Postgres> for OrderStatus {
 impl sqlx::Encode<'_, Postgres> for OrderStatus {
     fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
         let s = match self {
+            Self::PendingSubmit => "pending_submit",
             Self::New => "new",
             Self::PartiallyFilled => "partially_filled",
             Self::Filled => "filled",

@@ -51,6 +51,10 @@ pub enum OrderSide {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderStatus {
+    /// Outbox 단계: DB에 기록되었으나 거래소 응답 미수신.
+    /// 모호한 송신 실패(Timeout/Connection) 시 이 상태로 유지되며
+    /// Reconciler가 query_by_client_id로 실제 상태를 확정한다.
+    PendingSubmit,
     New,
     PartiallyFilled,
     Filled,
@@ -109,6 +113,10 @@ impl OrderStatus {
     pub fn can_transition_to(self, next: OrderStatus) -> Result<(), InvalidTransition> {
         use OrderStatus::*;
         let ok = match (self, next) {
+            // PendingSubmit은 모호한 송신 실패 후 Reconciler가 실제 상태를 확정한다.
+            (PendingSubmit, New | PartiallyFilled | Filled | Cancelled | Rejected | Expired) => {
+                true
+            }
             (New, PartiallyFilled | Filled | Cancelled | Rejected | Expired) => true,
             (PartiallyFilled, PartiallyFilled | Filled | Cancelled | Expired) => true,
             // terminal → terminal 은 거래소가 사후 정정하는 경우만 허용
@@ -458,5 +466,27 @@ mod tests {
             Err(OrderError::InvalidRequest(_))
         )));
         Ok(())
+    }
+
+    #[test]
+    fn pending_submit_can_transition_to_active_and_terminal_states() {
+        use OrderStatus::*;
+        for next in [New, PartiallyFilled, Filled, Cancelled, Rejected, Expired] {
+            assert!(
+                PendingSubmit.can_transition_to(next).is_ok(),
+                "PendingSubmit -> {next:?} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn active_states_cannot_transition_back_to_pending_submit() {
+        use OrderStatus::*;
+        for from in [New, PartiallyFilled, Filled, Cancelled] {
+            assert!(
+                from.can_transition_to(PendingSubmit).is_err(),
+                "{from:?} -> PendingSubmit should be rejected"
+            );
+        }
     }
 }
