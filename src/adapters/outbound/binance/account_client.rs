@@ -28,10 +28,7 @@ impl BinanceAccountClient {
         let body = format!("{params}&timestamp={ts}&recvWindow=5000");
         let sig = signing::sign(&self.api.secret, &body)
             .map_err(|e| AccountError::Network(e.to_string()))?;
-        let url = format!(
-            "{}{}?{}&signature={}",
-            self.api.rest_base, path, body, sig
-        );
+        let url = format!("{}{}?{}&signature={}", self.api.rest_base, path, body, sig);
         let resp = self
             .api
             .client

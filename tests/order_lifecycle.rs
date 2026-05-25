@@ -11,7 +11,9 @@ use trading_bot::domain::account::ExchangePositionSnapshot;
 use trading_bot::domain::order::{Fill, Order, OrderRequest, OrderSide, OrderStatus, OrderType};
 use trading_bot::domain::position::StoredPosition;
 use trading_bot::ports::fill_sink::FillSink;
-use trading_bot::ports::outbound::order_repository::{OrderRepository, OrphanOrder, RepositoryError};
+use trading_bot::ports::outbound::order_repository::{
+    OrderRepository, OrphanOrder, RepositoryError,
+};
 use trading_bot::ports::outbound::position_repository::PositionRepository;
 use uuid::Uuid;
 
@@ -55,7 +57,13 @@ impl OrderRepository for FakeOrderRepo {
     }
 
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Order>, RepositoryError> {
-        Ok(self.orders.lock().unwrap().iter().find(|o| o.id == id).cloned())
+        Ok(self
+            .orders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|o| o.id == id)
+            .cloned())
     }
 
     async fn find_by_exchange_id(
@@ -263,11 +271,7 @@ async fn fill_event_records_fill_and_updates_position() {
     let order = new_order();
     repo.upsert_order(&order).await.unwrap();
 
-    let handler = AccountEventHandler::new(
-        repo.clone(),
-        position_repo.clone(),
-        fill_sink.clone(),
-    );
+    let handler = AccountEventHandler::new(repo.clone(), position_repo.clone(), fill_sink.clone());
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let token = tokio_util::sync::CancellationToken::new();
@@ -319,11 +323,7 @@ async fn unknown_exchange_order_recorded_as_orphan() {
     let fill_sink = Arc::new(CaptureFillSink::default());
 
     // DB에 주문을 저장하지 않음 — exchange_order_id=99는 orphan이 된다
-    let handler = AccountEventHandler::new(
-        repo.clone(),
-        position_repo.clone(),
-        fill_sink.clone(),
-    );
+    let handler = AccountEventHandler::new(repo.clone(), position_repo.clone(), fill_sink.clone());
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let token = tokio_util::sync::CancellationToken::new();
