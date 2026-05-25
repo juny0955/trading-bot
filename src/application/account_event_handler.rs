@@ -1,4 +1,6 @@
-use crate::application::notification_formatter::{format_fill, format_order_status};
+use crate::application::notification_formatter::{
+    format_fill, format_fill_with_action, format_order_status,
+};
 use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
 use crate::domain::order::{Fill, Order, OrderStatus};
 use crate::ports::fill_sink::FillSink;
@@ -120,18 +122,25 @@ impl AccountEventHandler {
         if let Some(fd) = event.fill.as_ref() {
             let fill = fill_from_data(order, fd);
 
+            // 체결을 DB에 영구 기록한다. 실패해도 포지션 업데이트와 알림은 계속 진행한다.
             if let Err(e) = self.repo.record_fill(&fill).await {
                 error!(error = %e, "Fill PG 저장 실패");
             }
-            if let Err(e) = self
+            // 포지션을 업데이트하고 액션 타입으로 컨텍스트 알림을 생성한다.
+            // 포지션 업데이트 실패 시 기본 체결 포맷으로 fallback해 알림은 항상 전송한다.
+            let msg = match self
                 .position_repo
                 .apply_fill(order.strategy_instance_id, &fill)
                 .await
             {
-                error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
-            }
+                Ok((_, action)) => format_fill_with_action(&fill, &action),
+                Err(e) => {
+                    error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
+                    format_fill(&fill)
+                }
+            };
             self.fill_sink.emit(fill.clone()).await;
-            self.notifier.send(format_fill(&fill)).await;
+            self.notifier.send(msg).await;
             info!(symbol = %order.symbol, side = ?fd.side, qty = %fd.qty, price = %fd.price, "Fill 수신");
         }
     }
@@ -148,7 +157,8 @@ impl AccountEventHandler {
                         filled_qty = %updated.filled_qty,
                         "주문 상태 갱신"
                     );
-                    // 취소·거부·만료 시 알림 전송
+                    // 체결이 없는 종료 상태(취소·거부·만료)만 별도 알림을 전송한다.
+                    // Filled 상태는 record_fill_if_present에서 이미 알림을 전송했다.
                     if matches!(
                         status,
                         OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired

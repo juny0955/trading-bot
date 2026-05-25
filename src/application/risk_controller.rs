@@ -73,13 +73,17 @@ impl RiskController {
             .get(&req.symbol)
             .ok_or_else(|| RiskError::UnknownSymbol(req.symbol.clone()))?;
 
+        // 1단계: 거래소 필터(수량 최솟값, stepSize, tickSize, minNotional) 검증
         self.validate_filters(req, &filters)?;
+        // 2단계: 증거금 충분성 검증. 추정 명목가를 반환해 이후 단계에서 재사용한다.
         let est_notional = self.validate_margin(req, &limits, &filters)?;
+        // 3단계: 포지션 한도 검증. 한도 초과 시 거부 대신 수량을 자동 축소한다.
         let leverage = std::cmp::min(limits.max_leverage, filters.max_leverage);
         let adjusted_qty = self
             .validate_position_limit(req, &limits, est_notional, leverage, &filters)
             .await?;
 
+        // 수량이 조정된 경우 필터·증거금을 재검증해 일관성을 보장한다.
         let mut final_req = req.clone();
         if adjusted_qty != req.qty {
             final_req.qty = adjusted_qty;
@@ -87,6 +91,7 @@ impl RiskController {
             self.validate_margin(&final_req, &limits, &filters)?;
         }
 
+        // 4단계: 미체결 주문 수 한도 검증 (심볼별 최대 동시 주문 수)
         self.validate_open_order_count(&final_req, &limits).await?;
         Ok(final_req)
     }
@@ -131,11 +136,13 @@ impl RiskController {
         leverage: u32,
         filters: &SymbolFilters,
     ) -> Result<Decimal, RiskError> {
+        // reduce-only 주문은 포지션을 줄이므로 한도 검증을 건너뛴다.
         if req.reduce_only {
             return Ok(req.qty);
         }
         let lev = Decimal::from(leverage.max(1));
         let current_notional = self.current_position_notional(req).await;
+        // 증거금 단위로 변환해 한도와 비교한다 (명목가 ÷ 레버리지).
         let current_margin = current_notional / lev;
         let est_margin = est_notional / lev;
         let max_margin = limits.max_position_notional;
@@ -152,7 +159,7 @@ impl RiskController {
             return Ok(req.qty);
         }
 
-        // 부분 체결: 남은 증거금에 맞게 수량 축소
+        // 한도를 초과하지 않도록 남은 증거금 비율만큼 수량을 축소하고 stepSize에 내림 정렬한다.
         let remaining_notional = remaining_margin * lev;
         let adjusted_qty = floor_to_step(
             req.qty * remaining_notional / est_notional,
@@ -217,6 +224,7 @@ impl RiskController {
     }
 }
 
+// 수량을 stepSize 단위로 내림하여 거래소 필터에 맞는 최대 허용 수량을 반환한다.
 fn floor_to_step(qty: Decimal, step: Decimal) -> Decimal {
     if step.is_zero() {
         return qty;

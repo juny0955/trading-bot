@@ -111,12 +111,14 @@ pub trait Strategy: Send {
     where
         Self: Sized,
     {
+        // 기존 포지션 청산 주문을 먼저 제출하고 이어서 신규 포지션 오픈 주문을 추가한다.
         let mut cmds = close_position_command(position, symbol);
         cmds.push(open_position_command(symbol, new_side, qty));
         cmds
     }
 }
 
+// 기존 포지션 전량 청산용 reduce-only 시장가 주문을 반환한다. 포지션이 없으면 빈 벡터.
 fn close_position_command(position: &Position, symbol: &str) -> Vec<StrategyCommand> {
     position
         .side
@@ -132,10 +134,12 @@ fn close_position_command(position: &Position, symbol: &str) -> Vec<StrategyComm
         .collect()
 }
 
+// 신규 포지션을 여는 시장가 주문을 생성한다.
 fn open_position_command(symbol: &str, side: OrderSide, qty: Decimal) -> StrategyCommand {
     StrategyCommand::SubmitOrder(market_order(symbol, side, qty, false))
 }
 
+// 시장가 주문 공통 파라미터를 조립한다. reduce_only=true이면 청산 전용 주문이 된다.
 fn market_order(symbol: &str, side: OrderSide, qty: Decimal, reduce_only: bool) -> OrderRequest {
     OrderRequest {
         symbol: symbol.into(),
@@ -147,6 +151,7 @@ fn market_order(symbol: &str, side: OrderSide, qty: Decimal, reduce_only: bool) 
     }
 }
 
+// Buy ↔ Sell 반전: 포지션 청산 시 반대 방향 주문이 필요하다.
 fn opposite_side(side: OrderSide) -> OrderSide {
     match side {
         OrderSide::Buy => OrderSide::Sell,

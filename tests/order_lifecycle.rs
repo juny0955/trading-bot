@@ -9,7 +9,7 @@ use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::order_execution_event::{FillData, OrderExecutionEvent};
 use trading_bot::domain::account::ExchangePositionSnapshot;
 use trading_bot::domain::order::{Fill, Order, OrderRequest, OrderSide, OrderStatus, OrderType};
-use trading_bot::domain::position::StoredPosition;
+use trading_bot::domain::position::{PositionAction, StoredPosition};
 use trading_bot::ports::fill_sink::FillSink;
 use trading_bot::ports::outbound::notification_sink::NoopNotificationSink;
 use trading_bot::ports::outbound::order_repository::{
@@ -168,23 +168,24 @@ impl PositionRepository for FakePositionRepo {
         &self,
         instance_id: i64,
         fill: &Fill,
-    ) -> Result<StoredPosition, RepositoryError> {
+    ) -> Result<(StoredPosition, PositionAction), RepositoryError> {
         let mut positions = self.positions.lock().unwrap();
         let stored = positions
             .iter_mut()
             .find(|p| p.strategy_instance_id == instance_id && p.symbol == fill.symbol);
 
-        let updated = match stored {
+        let (updated, action) = match stored {
             Some(s) => {
-                s.position = s
+                let (new_pos, action) = s
                     .position
                     .apply(fill)
                     .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+                s.position = new_pos;
                 s.updated_at = Utc::now();
-                s.clone()
+                (s.clone(), action)
             }
             None => {
-                let new_pos = trading_bot::domain::position::Position::default()
+                let (new_pos, action) = trading_bot::domain::position::Position::default()
                     .apply(fill)
                     .map_err(|e| RepositoryError::Storage(e.to_string()))?;
                 let sp = StoredPosition {
@@ -195,10 +196,10 @@ impl PositionRepository for FakePositionRepo {
                     updated_at: Utc::now(),
                 };
                 positions.push(sp.clone());
-                sp
+                (sp, action)
             }
         };
-        Ok(updated)
+        Ok((updated, action))
     }
 
     async fn upsert_from_snapshot(

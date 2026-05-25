@@ -1,6 +1,24 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// 거래소에서 허용하는 주문 수량·가격·명목가 제약 조건입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::exchange_info::SymbolFilters;
+///
+/// let f = SymbolFilters {
+///     symbol: "BTCUSDT".into(),
+///     min_notional: dec!(5),
+///     min_qty: dec!(0.001),
+///     step_size: dec!(0.001),
+///     tick_size: dec!(0.1),
+///     max_leverage: 20,
+/// };
+/// assert!(f.validate_qty(dec!(0.001)).is_ok());
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolFilters {
     pub symbol: String,
@@ -11,6 +29,17 @@ pub struct SymbolFilters {
     pub max_leverage: u32,
 }
 
+/// `SymbolFilters` 검증 실패 시 반환되는 오류 유형입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::exchange_info::FilterViolation;
+///
+/// let err = FilterViolation::QtyBelowMin { qty: dec!(0.0001), min_qty: dec!(0.001) };
+/// assert!(err.to_string().contains("below minQty"));
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum FilterViolation {
     #[error("qty {qty} below minQty {min_qty}")]
@@ -27,6 +56,21 @@ pub enum FilterViolation {
 }
 
 impl SymbolFilters {
+    /// 수량이 최솟값 이상이며 stepSize에 정렬됐는지 검사한다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::domain::exchange_info::SymbolFilters;
+    ///
+    /// let f = SymbolFilters {
+    ///     symbol: "X".into(), min_notional: dec!(0), min_qty: dec!(0.001),
+    ///     step_size: dec!(0.001), tick_size: dec!(0.1), max_leverage: 10,
+    /// };
+    /// assert!(f.validate_qty(dec!(0.001)).is_ok());
+    /// assert!(f.validate_qty(dec!(0.0005)).is_err());
+    /// ```
     pub fn validate_qty(&self, qty: Decimal) -> Result<(), FilterViolation> {
         if qty < self.min_qty {
             return Err(FilterViolation::QtyBelowMin {
@@ -43,6 +87,21 @@ impl SymbolFilters {
         Ok(())
     }
 
+    /// 가격이 tickSize에 정렬됐는지 검사한다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::domain::exchange_info::SymbolFilters;
+    ///
+    /// let f = SymbolFilters {
+    ///     symbol: "X".into(), min_notional: dec!(0), min_qty: dec!(0.001),
+    ///     step_size: dec!(0.001), tick_size: dec!(0.1), max_leverage: 10,
+    /// };
+    /// assert!(f.validate_price(dec!(100.1)).is_ok());
+    /// assert!(f.validate_price(dec!(100.05)).is_err());
+    /// ```
     pub fn validate_price(&self, price: Decimal) -> Result<(), FilterViolation> {
         if !is_aligned(price, self.tick_size) {
             return Err(FilterViolation::PriceTick {
@@ -53,6 +112,21 @@ impl SymbolFilters {
         Ok(())
     }
 
+    /// 명목가(qty × price)가 minNotional 이상인지 검사한다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_decimal_macros::dec;
+    /// use trading_bot::domain::exchange_info::SymbolFilters;
+    ///
+    /// let f = SymbolFilters {
+    ///     symbol: "X".into(), min_notional: dec!(5), min_qty: dec!(0.001),
+    ///     step_size: dec!(0.001), tick_size: dec!(0.1), max_leverage: 10,
+    /// };
+    /// assert!(f.validate_notional(dec!(0.01), dec!(1000)).is_ok());
+    /// assert!(f.validate_notional(dec!(0.001), dec!(1)).is_err());
+    /// ```
     pub fn validate_notional(&self, qty: Decimal, price: Decimal) -> Result<(), FilterViolation> {
         let notional = qty * price;
         if notional < self.min_notional {
@@ -65,6 +139,7 @@ impl SymbolFilters {
     }
 }
 
+// step이 0이면 정렬 조건 없음 (거래소 스펙). value % step == 0 이면 정렬된 것으로 판단한다.
 fn is_aligned(value: Decimal, step: Decimal) -> bool {
     if step.is_zero() {
         return true;

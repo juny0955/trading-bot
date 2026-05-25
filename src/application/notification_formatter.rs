@@ -1,4 +1,5 @@
 use crate::domain::order::{Fill, Order, OrderSide, OrderStatus};
+use crate::domain::position::PositionAction;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
@@ -21,6 +22,90 @@ pub fn format_fill(fill: &Fill) -> String {
         fill.fee,
         fill.fee_asset,
     )
+}
+
+/// 포지션 액션 컨텍스트를 포함한 체결 알림 메시지를 생성한다.
+///
+/// 신규 진입·추가 진입·청산을 구분하며, 청산 시 수익(USDT)과 수익률(%)을 포함한다.
+///
+/// # Examples
+///
+/// ```ignore
+/// let msg = format_fill_with_action(&fill, &PositionAction::Opened);
+/// assert!(msg.starts_with("📈"));
+/// ```
+pub fn format_fill_with_action(fill: &Fill, action: &PositionAction) -> String {
+    match action {
+        PositionAction::Opened => format!(
+            "📈 진입\n{} · {}\n수량: {} @ {} USDT\n수수료: {} {}",
+            fill.symbol,
+            side_label(fill.side),
+            fill.qty,
+            fill.price,
+            fill.fee,
+            fill.fee_asset,
+        ),
+        PositionAction::Increased {
+            new_avg_entry_price,
+        } => format!(
+            "📈 추가 진입\n{} · {}\n수량: {} @ {} USDT (평균: {} USDT)\n수수료: {} {}",
+            fill.symbol,
+            side_label(fill.side),
+            fill.qty,
+            fill.price,
+            new_avg_entry_price,
+            fill.fee,
+            fill.fee_asset,
+        ),
+        PositionAction::PartialClose {
+            closed_qty,
+            this_pnl,
+            pnl_pct,
+        } => format!(
+            "📉 부분 청산\n{} · {}\n수량: {} @ {} USDT\n수익: {} USDT (수익률: {})\n수수료: {} {}",
+            fill.symbol,
+            closing_side_label(fill.side),
+            closed_qty,
+            fill.price,
+            format_pnl(*this_pnl),
+            format_pct(*pnl_pct),
+            fill.fee,
+            fill.fee_asset,
+        ),
+        PositionAction::FullClose { this_pnl, pnl_pct } => format!(
+            "🏁 청산\n{} · {}\n수량: {} @ {} USDT\n수익: {} USDT (수익률: {})\n수수료: {} {}",
+            fill.symbol,
+            closing_side_label(fill.side),
+            fill.qty,
+            fill.price,
+            format_pnl(*this_pnl),
+            format_pct(*pnl_pct),
+            fill.fee,
+            fill.fee_asset,
+        ),
+        PositionAction::Flipped {
+            closed_qty,
+            this_pnl,
+            pnl_pct,
+        } => {
+            let open_qty = flipped_open_qty(fill.qty, *closed_qty);
+            format!(
+                "🔄 방향 전환\n{}  {}→{}\n청산: {} @ {} USDT (수익: {} USDT / {})\n신규: {} {} @ {} USDT\n수수료: {} {}",
+                fill.symbol,
+                closing_side_label(fill.side),
+                side_label(fill.side),
+                closed_qty,
+                fill.price,
+                format_pnl(*this_pnl),
+                format_pct(*pnl_pct),
+                open_qty,
+                side_label(fill.side),
+                fill.price,
+                fill.fee,
+                fill.fee_asset,
+            )
+        }
+    }
 }
 
 /// 취소·거부·만료 주문을 알림 메시지 문자열로 변환한다.
@@ -90,6 +175,37 @@ fn side_label(side: OrderSide) -> &'static str {
     match side {
         OrderSide::Buy => "LONG",
         OrderSide::Sell => "SHORT",
+    }
+}
+
+// 청산 체결의 fill.side는 포지션 반대 방향이므로 원래 포지션 방향을 반환한다.
+fn closing_side_label(fill_side: OrderSide) -> &'static str {
+    match fill_side {
+        OrderSide::Sell => "LONG",
+        OrderSide::Buy => "SHORT",
+    }
+}
+
+// Flipped 체결에서 신규 포지션 수량을 계산한다. fill_qty > closed_qty 임이 보장됨.
+fn flipped_open_qty(fill_qty: Decimal, closed_qty: Decimal) -> Decimal {
+    fill_qty - closed_qty
+}
+
+// 양수는 "+" 접두사를 붙이고 음수는 Decimal 자체의 "-" 부호를 사용한다.
+fn format_pnl(pnl: Decimal) -> String {
+    if pnl >= Decimal::ZERO {
+        format!("+{:.2}", pnl)
+    } else {
+        format!("{:.2}", pnl)
+    }
+}
+
+// 양수 수익률에 "+" 접두사를 붙여 손익 방향을 명확히 표시한다.
+fn format_pct(pct: Decimal) -> String {
+    if pct >= Decimal::ZERO {
+        format!("+{:.2}%", pct)
+    } else {
+        format!("{:.2}%", pct)
     }
 }
 
@@ -188,6 +304,75 @@ mod tests {
         assert_eq!(buy, 2);
         assert_eq!(vol, dec!(200) + dec!(200) + dec!(450));
         assert_eq!(fee, dec!(0.6));
+        Ok(())
+    }
+
+    #[test]
+    fn format_opened_shows_entry_icon() -> Result<()> {
+        let fill = make_fill(OrderSide::Buy, dec!(0.1), dec!(42000), dec!(0.42));
+        let msg = format_fill_with_action(&fill, &PositionAction::Opened);
+        assert!(msg.contains("📈"));
+        assert!(msg.contains("진입"));
+        assert!(msg.contains("LONG"));
+        assert!(!msg.contains("추가")); // 추가 진입이 아님을 확인
+        Ok(())
+    }
+
+    #[test]
+    fn format_increased_shows_avg_price() -> Result<()> {
+        let fill = make_fill(OrderSide::Buy, dec!(0.1), dec!(43000), dec!(0.43));
+        let action = PositionAction::Increased {
+            new_avg_entry_price: dec!(42500),
+        };
+        let msg = format_fill_with_action(&fill, &action);
+        assert!(msg.contains("추가 진입"));
+        assert!(msg.contains("42500")); // 평균 진입가 포함
+        Ok(())
+    }
+
+    #[test]
+    fn format_partial_close_shows_pnl() -> Result<()> {
+        let fill = make_fill(OrderSide::Sell, dec!(0.05), dec!(44000), dec!(0.44));
+        let action = PositionAction::PartialClose {
+            closed_qty: dec!(0.05),
+            this_pnl: dec!(100),
+            pnl_pct: dec!(10),
+        };
+        let msg = format_fill_with_action(&fill, &action);
+        assert!(msg.contains("부분 청산"));
+        assert!(msg.contains("LONG")); // closing_side_label(Sell) = LONG
+        assert!(msg.contains("+100.00"));
+        assert!(msg.contains("+10.00%"));
+        Ok(())
+    }
+
+    #[test]
+    fn format_full_close_shows_pnl() -> Result<()> {
+        let fill = make_fill(OrderSide::Sell, dec!(0.1), dec!(44000), dec!(0.44));
+        let action = PositionAction::FullClose {
+            this_pnl: dec!(200),
+            pnl_pct: dec!(4.76),
+        };
+        let msg = format_fill_with_action(&fill, &action);
+        assert!(msg.contains("🏁"));
+        assert!(msg.contains("청산"));
+        assert!(msg.contains("+200.00"));
+        Ok(())
+    }
+
+    #[test]
+    fn format_flipped_shows_direction_change() -> Result<()> {
+        // LONG 0.1 포지션 보유 중, Sell 0.3으로 청산 + SHORT 0.2 오픈
+        let fill = make_fill(OrderSide::Sell, dec!(0.3), dec!(44000), dec!(0.44));
+        let action = PositionAction::Flipped {
+            closed_qty: dec!(0.1),
+            this_pnl: dec!(200),
+            pnl_pct: dec!(4.76),
+        };
+        let msg = format_fill_with_action(&fill, &action);
+        assert!(msg.contains("🔄"));
+        assert!(msg.contains("방향 전환"));
+        assert!(msg.contains("LONG→SHORT")); // closing(Sell)=LONG, side(Sell)=SHORT
         Ok(())
     }
 }

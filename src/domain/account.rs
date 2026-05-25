@@ -3,6 +3,17 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// REST API로 조회한 계정 잔고 스냅샷입니다.
+///
+/// # Examples
+///
+/// ```
+/// use chrono::Utc;
+/// use trading_bot::domain::account::AccountSnapshot;
+///
+/// let snap = AccountSnapshot::zero(Utc::now());
+/// assert_eq!(snap.available_balance, rust_decimal::Decimal::ZERO);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountSnapshot {
     pub available_balance: Decimal,
@@ -12,6 +23,17 @@ pub struct AccountSnapshot {
 }
 
 impl AccountSnapshot {
+    /// 모든 잔고가 0인 초기 스냅샷을 생성합니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chrono::Utc;
+    /// use trading_bot::domain::account::AccountSnapshot;
+    ///
+    /// let snap = AccountSnapshot::zero(Utc::now());
+    /// assert!(snap.total_wallet_balance.is_zero());
+    /// ```
     pub fn zero(now: DateTime<Utc>) -> Self {
         Self {
             available_balance: Decimal::ZERO,
@@ -22,6 +44,24 @@ impl AccountSnapshot {
     }
 }
 
+/// 거래소에서 조회한 단일 심볼의 포지션 상태입니다.
+///
+/// # Examples
+///
+/// ```
+/// use rust_decimal_macros::dec;
+/// use trading_bot::domain::order::OrderSide;
+/// use trading_bot::domain::account::ExchangePositionSnapshot;
+///
+/// let snap = ExchangePositionSnapshot {
+///     symbol: "BTCUSDT".into(),
+///     side: OrderSide::Buy,
+///     qty: dec!(0.1),
+///     entry_price: dec!(42000),
+///     leverage: 10,
+/// };
+/// assert_eq!(snap.leverage, 10);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExchangePositionSnapshot {
     pub symbol: String,
@@ -31,6 +71,7 @@ pub struct ExchangePositionSnapshot {
     pub leverage: u32,
 }
 
+/// USER_DATA_STREAM에서 수신한 계정 잔고 업데이트 이벤트입니다.
 #[derive(Debug, Clone)]
 pub struct AccountUpdateEvent {
     pub available_balance: Decimal,
@@ -39,6 +80,7 @@ pub struct AccountUpdateEvent {
     pub event_time: DateTime<Utc>,
 }
 
+/// 계정 API 호출 시 발생할 수 있는 오류입니다.
 #[derive(Debug, thiserror::Error)]
 pub enum AccountError {
     #[error("계정 API 호출 실패: {0}")]

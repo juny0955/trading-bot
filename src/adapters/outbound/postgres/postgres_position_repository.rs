@@ -1,6 +1,6 @@
 use crate::domain::account::ExchangePositionSnapshot;
 use crate::domain::order::{Fill, OrderSide};
-use crate::domain::position::{Position, StoredPosition};
+use crate::domain::position::{Position, PositionAction, StoredPosition};
 use crate::ports::order_repository::RepositoryError;
 use crate::ports::position_repository::PositionRepository;
 use async_trait::async_trait;
@@ -98,7 +98,7 @@ impl PositionRepository for PostgresPositionRepository {
         &self,
         instance_id: i64,
         fill: &Fill,
-    ) -> Result<StoredPosition, RepositoryError> {
+    ) -> Result<(StoredPosition, PositionAction), RepositoryError> {
         let mut tx = self.pool.begin().await?;
 
         let cur_db = sqlx::query_as::<_, DbPosition>(
@@ -118,7 +118,7 @@ impl PositionRepository for PostgresPositionRepository {
             .map(StoredPosition::from)
             .unwrap_or_else(|| StoredPosition::flat(instance_id, fill.symbol.clone()));
 
-        let next_core = cur
+        let (next_core, action) = cur
             .position
             .apply(fill)
             .map_err(|e| RepositoryError::Storage(e.to_string()))?;
@@ -164,7 +164,7 @@ impl PositionRepository for PostgresPositionRepository {
         .await?;
 
         tx.commit().await?;
-        Ok(next)
+        Ok((next, action))
     }
 
     async fn upsert_from_snapshot(

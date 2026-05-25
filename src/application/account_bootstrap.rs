@@ -26,6 +26,7 @@ pub async fn bootstrap(
     symbols: &[String],
     symbol_configs: &[SymbolConfig],
 ) -> Result<AccountSnapshot, BootstrapError> {
+    // 1단계: 계정 잔고 스냅샷 조회. 실패 시 부팅을 중단한다.
     let snap = account_src
         .fetch_account()
         .await
@@ -36,16 +37,20 @@ pub async fn bootstrap(
         "계정 스냅샷 조회 완료"
     );
 
+    // 2단계: 심볼별 레버리지·마진 타입 설정 (설정 실패는 경고만 남기고 계속 진행).
     sync_leverage_margin(account_src, symbol_configs).await;
 
+    // 3단계: DB 오픈 주문과 거래소 상태 정합. 심볼 단위 실패는 soft error로 처리한다.
     for symbol in symbols {
         if let Err(e) = reconcile_open_orders(executor, order_repo, symbol).await {
             warn!(symbol, error = %e, "오픈 주문 정합 실패 — 계속 진행");
         }
     }
 
+    // 4단계: PendingSubmit 주문을 거래소에서 조회해 최종 상태(체결·거부)로 확정한다.
     resolve_pending_submits(executor, order_repo).await;
 
+    // 5단계: 거래소 포지션을 DB에 덮어써 부팅 시점 상태를 일치시킨다.
     sync_positions(account_src, position_repo, instances).await;
 
     info!("부팅 동기화 완료");
