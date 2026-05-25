@@ -4,7 +4,7 @@ use crate::domain::account::{AccountError, AccountSnapshot, ExchangePositionSnap
 use crate::domain::order::OrderSide;
 use crate::ports::account_source::AccountSource;
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::Utc;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use std::sync::Arc;
@@ -130,7 +130,7 @@ fn parse_account(v: &Value) -> AccountSnapshot {
         available_balance: decimal_str(&v["availableBalance"]).unwrap_or(Decimal::ZERO),
         total_wallet_balance: decimal_str(&v["totalWalletBalance"]).unwrap_or(Decimal::ZERO),
         total_unrealized_pnl: decimal_str(&v["totalUnrealizedProfit"]).unwrap_or(Decimal::ZERO),
-        fetched_at: parse_update_time(&v["updateTime"]),
+        fetched_at: Utc::now(),
     }
 }
 
@@ -171,8 +171,3 @@ fn decimal_str(v: &Value) -> Option<Decimal> {
     v.as_str().and_then(|s| s.parse::<Decimal>().ok())
 }
 
-fn parse_update_time(v: &Value) -> DateTime<Utc> {
-    v.as_i64()
-        .and_then(|ms| Utc.timestamp_millis_opt(ms).single())
-        .unwrap_or_else(Utc::now)
-}

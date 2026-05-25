@@ -117,14 +117,25 @@ impl OrderExecutor for BinanceOrderExecutor {
     }
 
     async fn open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
-        let id = Uuid::now_v7().to_string();
         let ts = timestamp_ms()?;
-        let params = signed_params(
-            open_orders_params(&self.api.api_key, symbol, ts),
-            &self.api.secret,
-        )?;
-        let req = ws_request(&id, "openOrders.status", params);
-        let result = self.api.send_and_wait(id, req).await?;
+        let query = format!("symbol={}&timestamp={}&recvWindow=5000", symbol, ts);
+        let sig = signing::sign(&self.api.secret, &query)
+            .map_err(|e| OrderError::Internal(anyhow::anyhow!(e)))?;
+        let url = format!(
+            "{}/fapi/v1/openOrders?{}&signature={}",
+            self.api.rest_base, query, sig
+        );
+        let result: Value = self
+            .api
+            .client
+            .get(&url)
+            .header("X-MBX-APIKEY", &self.api.api_key)
+            .send()
+            .await
+            .map_err(|e| OrderError::Internal(anyhow::anyhow!(e)))?
+            .json()
+            .await
+            .map_err(|e| OrderError::Internal(anyhow::anyhow!(e)))?;
 
         let Some(orders) = result.as_array() else {
             return Ok(Vec::new());
@@ -268,13 +279,6 @@ fn order_lookup_params<'a>(
     params
 }
 
-fn open_orders_params<'a>(api_key: &'a str, symbol: &'a str, ts: u64) -> BTreeMap<&'a str, Value> {
-    let mut params = BTreeMap::new();
-    params.insert("apiKey", json!(api_key));
-    params.insert("symbol", json!(symbol));
-    params.insert("timestamp", json!(ts));
-    params
-}
 
 fn order_time_in_force(request: &OrderRequest) -> Option<&'static str> {
     if request.post_only {
