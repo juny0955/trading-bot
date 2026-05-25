@@ -46,6 +46,9 @@ impl BinanceOrderExecutor {
         Self { api }
     }
 
+    /// `BTreeMap` 파라미터를 Binance API용 쿼리 문자열로 직렬화한다.
+    ///
+    /// `BTreeMap`의 정렬 보장 덕분에 서명 검증에 필요한 일관된 키 순서가 유지된다.
     fn build_params_str(params: &BTreeMap<&str, Value>) -> String {
         params
             .iter()
@@ -57,6 +60,7 @@ impl BinanceOrderExecutor {
 
 #[async_trait]
 impl OrderExecutor for BinanceOrderExecutor {
+    /// 새 주문을 Binance WebSocket API로 제출하고 로컬 Order 레코드를 반환한다.
     async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
         let order = Order::new_from_request(request.clone())?;
         let id = order.id.to_string();
@@ -73,6 +77,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         Ok(filled)
     }
 
+    /// 활성 주문을 취소하고 상태가 업데이트된 Order를 반환한다.
     async fn cancel(&self, order: &Order) -> Result<Order, OrderError> {
         let exchange_id = order
             .exchange_order_id
@@ -96,6 +101,7 @@ impl OrderExecutor for BinanceOrderExecutor {
         Ok(cancelled)
     }
 
+    /// 거래소에서 주문 현재 상태를 조회하고 업데이트된 Order를 반환한다.
     async fn query(&self, order: &Order) -> Result<Order, OrderError> {
         let exchange_id = order
             .exchange_order_id
@@ -116,6 +122,10 @@ impl OrderExecutor for BinanceOrderExecutor {
         Ok(updated)
     }
 
+    /// REST GET `/fapi/v1/openOrders`로 심볼의 미체결 주문 목록을 조회한다.
+    ///
+    /// WebSocket이 아닌 REST를 사용하는 이유: 단발성 스냅샷 조회이며
+    /// WS 연결 없이도 호출 가능해야 하기 때문이다.
     async fn open_orders(&self, symbol: &str) -> Result<Vec<ExchangeOpenOrder>, OrderError> {
         let ts = timestamp_ms()?;
         let query = format!("symbol={}&timestamp={}&recvWindow=5000", symbol, ts);
@@ -147,6 +157,7 @@ impl OrderExecutor for BinanceOrderExecutor {
             .collect())
     }
 
+    /// `client_order_id`로 주문 상태를 조회하고 Reconciler용 부분 Order를 반환한다.
     async fn query_by_client_id(
         &self,
         symbol: &str,
@@ -249,6 +260,7 @@ fn parse_order_status_response(
         exchange_order_id,
         strategy_instance_id: 0,
         symbol: symbol.to_string(),
+        // side/order_type은 로컬 DB 레코드와 머지 후 덮어쓰므로 placeholder
         order_type: OrderType::Market,
         side: OrderSide::Buy,
         status,
@@ -279,8 +291,8 @@ fn order_lookup_params<'a>(
     params
 }
 
-
 fn order_time_in_force(request: &OrderRequest) -> Option<&'static str> {
+    // GTX(post-only): 메이커 전용 — post_only가 true이면 order_type보다 우선 적용
     if request.post_only {
         return Some("GTX");
     }
@@ -394,6 +406,58 @@ mod tests {
         assert_eq!(order.side, OrderSide::Sell);
         assert_eq!(order.orig_qty, dec!(2.5));
         assert_eq!(order.executed_qty, dec!(1.0));
+        Ok(())
+    }
+
+    #[test]
+    fn order_side_str_roundtrip() -> anyhow::Result<()> {
+        assert_eq!(order_side_str(OrderSide::Buy), "BUY");
+        assert_eq!(order_side_str(OrderSide::Sell), "SELL");
+        Ok(())
+    }
+
+    #[test]
+    fn order_type_str_all_variants() -> anyhow::Result<()> {
+        assert_eq!(order_type_str(&OrderType::Market), "MARKET");
+        assert_eq!(order_type_str(&OrderType::Limit), "LIMIT");
+        assert_eq!(order_type_str(&OrderType::StopMarket), "STOP_MARKET");
+        assert_eq!(order_type_str(&OrderType::StopLimit), "STOP");
+        Ok(())
+    }
+
+    #[test]
+    fn order_time_in_force_post_only_returns_gtx() -> anyhow::Result<()> {
+        // post_only는 order_type과 무관하게 GTX(메이커 전용)를 강제한다
+        let request = OrderRequest {
+            order_type: OrderType::Limit,
+            post_only: true,
+            ..Default::default()
+        };
+        assert_eq!(order_time_in_force(&request), Some("GTX"));
+        Ok(())
+    }
+
+    #[test]
+    fn order_time_in_force_market_is_none() -> anyhow::Result<()> {
+        // Market 주문에는 TIF 파라미터가 불필요하다
+        let request = OrderRequest {
+            order_type: OrderType::Market,
+            ..Default::default()
+        };
+        assert_eq!(order_time_in_force(&request), None);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_order_status_known_variants() -> anyhow::Result<()> {
+        assert_eq!(parse_order_status(Some("FILLED")), Some(OrderStatus::Filled));
+        assert_eq!(parse_order_status(Some("CANCELED")), Some(OrderStatus::Cancelled));
+        assert_eq!(parse_order_status(Some("PARTIALLY_FILLED")), Some(OrderStatus::PartiallyFilled));
+        assert_eq!(parse_order_status(Some("EXPIRED")), Some(OrderStatus::Expired));
+        assert_eq!(parse_order_status(Some("REJECTED")), Some(OrderStatus::Rejected));
+        // 알 수 없는 상태는 None
+        assert_eq!(parse_order_status(Some("UNKNOWN_STATE")), None);
+        assert_eq!(parse_order_status(None), None);
         Ok(())
     }
 }
