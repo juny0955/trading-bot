@@ -216,6 +216,7 @@ async fn sync_state(
         &*boot.position_repo,
         instances,
         symbols,
+        &boot.binance_cfg.symbols,
     )
     .await
     {

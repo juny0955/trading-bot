@@ -1,12 +1,16 @@
 -- symbols
 CREATE TABLE IF NOT EXISTS symbols
 (
-    symbol     VARCHAR(20) PRIMARY KEY,
-    enabled    BOOLEAN     NOT NULL DEFAULT TRUE,
-    memo       VARCHAR(255),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    symbol       VARCHAR(20) PRIMARY KEY,
+    enabled      BOOLEAN     NOT NULL DEFAULT TRUE,
+    leverage     SMALLINT    NOT NULL DEFAULT 10,
+    margin_type  VARCHAR(10) NOT NULL DEFAULT 'CROSSED',
+    memo         VARCHAR(255),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS leverage    SMALLINT    NOT NULL DEFAULT 10;
+ALTER TABLE symbols ADD COLUMN IF NOT EXISTS margin_type VARCHAR(10) NOT NULL DEFAULT 'CROSSED';
 
 -- streams
 CREATE TABLE IF NOT EXISTS streams

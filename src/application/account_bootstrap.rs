@@ -1,3 +1,4 @@
+use crate::config::binance_config::SymbolConfig;
 use crate::domain::account::AccountSnapshot;
 use crate::domain::order::{ExchangeOpenOrder, Order, OrderStatus};
 use crate::domain::strategies::StrategyInstance;
@@ -37,7 +38,7 @@ where
     }
 }
 
-/// 계정 스냅샷 조회 + 오픈 주문 정합 + PendingSubmit 재조정 + 포지션 동기화를 수행한다.
+/// 계정 스냅샷 조회 + 오픈 주문 정합 + PendingSubmit 재조정 + 포지션 동기화 + 레버리지/마진 설정을 수행한다.
 pub async fn bootstrap(
     account_src: &dyn AccountSource,
     executor: &dyn OrderExecutor,
@@ -45,6 +46,7 @@ pub async fn bootstrap(
     position_repo: &dyn PositionRepository,
     instances: &[StrategyInstance],
     symbols: &[String],
+    symbol_configs: &[SymbolConfig],
 ) -> Result<AccountSnapshot, BootstrapError> {
     let snap = retry(3, || account_src.fetch_account())
         .await
@@ -54,6 +56,8 @@ pub async fn bootstrap(
         wallet_balance = %snap.total_wallet_balance,
         "계정 스냅샷 조회 완료"
     );
+
+    sync_leverage_margin(account_src, symbol_configs).await;
 
     for symbol in symbols {
         if let Err(e) = reconcile_open_orders(executor, order_repo, symbol).await {
@@ -67,6 +71,27 @@ pub async fn bootstrap(
 
     info!("부팅 동기화 완료");
     Ok(snap)
+}
+
+async fn sync_leverage_margin(account_src: &dyn AccountSource, symbol_configs: &[SymbolConfig]) {
+    for cfg in symbol_configs.iter().filter(|c| c.enabled) {
+        match account_src
+            .configure_symbol(&cfg.symbol, cfg.leverage, &cfg.margin_type)
+            .await
+        {
+            Ok(()) => info!(
+                symbol = %cfg.symbol,
+                leverage = cfg.leverage,
+                margin_type = %cfg.margin_type,
+                "레버리지/마진 모드 설정 완료"
+            ),
+            Err(e) => warn!(
+                symbol = %cfg.symbol,
+                error = %e,
+                "레버리지/마진 모드 설정 실패 — 계속 진행"
+            ),
+        }
+    }
 }
 
 async fn sync_positions(

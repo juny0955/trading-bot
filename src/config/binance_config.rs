@@ -22,6 +22,8 @@ pub enum StreamType {
 pub struct SymbolConfig {
     pub symbol: String,
     pub enabled: bool,
+    pub leverage: i16,
+    pub margin_type: String,
 }
 
 #[derive(Debug, Clone)]

@@ -75,7 +75,7 @@ impl PostgresConfigRepository {
     }
 
     async fn load_symbols(pool: &PgPool) -> Result<Vec<SymbolConfig>> {
-        let rows = query!("SELECT symbol, enabled FROM symbols")
+        let rows = query!("SELECT symbol, enabled, leverage, margin_type FROM symbols")
             .fetch_all(pool)
             .await?;
 
@@ -84,6 +84,8 @@ impl PostgresConfigRepository {
             .map(|r| SymbolConfig {
                 symbol: r.symbol,
                 enabled: r.enabled,
+                leverage: r.leverage,
+                margin_type: r.margin_type,
             })
             .collect())
     }

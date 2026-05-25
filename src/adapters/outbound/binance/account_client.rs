@@ -23,6 +23,38 @@ impl BinanceAccountClient {
         Self { api }
     }
 
+    async fn signed_post(&self, path: &str, params: &str) -> Result<Value, AccountError> {
+        let ts = signing::timestamp_ms().map_err(|e| AccountError::Network(e.to_string()))?;
+        let body = format!("{params}&timestamp={ts}&recvWindow=5000");
+        let sig = signing::sign(&self.api.secret, &body)
+            .map_err(|e| AccountError::Network(e.to_string()))?;
+        let url = format!(
+            "{}{}?{}&signature={}",
+            self.api.rest_base, path, body, sig
+        );
+        let resp = self
+            .api
+            .client
+            .post(&url)
+            .header("X-MBX-APIKEY", &self.api.api_key)
+            .send()
+            .await
+            .map_err(|e| AccountError::Network(e.to_string()))?;
+        let status = resp.status();
+        let val: Value = resp
+            .json()
+            .await
+            .map_err(|e| AccountError::Parse(e.to_string()))?;
+        if !status.is_success() {
+            // -4046: No need to change margin type (already set) — treat as success
+            if val["code"].as_i64() == Some(-4046) {
+                return Ok(val);
+            }
+            return Err(AccountError::Network(format!("{status}: {val}")));
+        }
+        Ok(val)
+    }
+
     async fn signed_get(&self, path: &str) -> Result<Value, AccountError> {
         let ts = signing::timestamp_ms().map_err(|e| AccountError::Network(e.to_string()))?;
         let query = format!("timestamp={ts}&recvWindow=5000");
@@ -72,6 +104,27 @@ impl AccountSource for BinanceAccountClient {
     async fn fetch_positions(&self) -> Result<Vec<ExchangePositionSnapshot>, AccountError> {
         let v = self.signed_get_with_retry("/fapi/v2/positionRisk").await?;
         Ok(parse_positions(&v))
+    }
+
+    async fn configure_symbol(
+        &self,
+        symbol: &str,
+        leverage: i16,
+        margin_type: &str,
+    ) -> Result<(), AccountError> {
+        self.signed_post(
+            "/fapi/v1/marginType",
+            &format!("symbol={symbol}&marginType={margin_type}"),
+        )
+        .await?;
+
+        self.signed_post(
+            "/fapi/v1/leverage",
+            &format!("symbol={symbol}&leverage={leverage}"),
+        )
+        .await?;
+
+        Ok(())
     }
 }
 
