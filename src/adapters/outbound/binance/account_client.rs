@@ -82,7 +82,7 @@ impl BinanceAccountClient {
                 Ok(v) => return Ok(v),
                 // IP 밴(418): 재시도해도 악화될 뿐 — 즉시 실패
                 Err(e @ AccountError::IpBanned) => {
-                    warn!(path, "IP 밴 — 재시도 중단");
+                    warn!(path, attempt, "IP 밴(418) — 재시도 중단, 수분 대기 필요");
                     return Err(e);
                 }
                 // 요청 초과(429): 60초 대기 후 한 번만 재시도

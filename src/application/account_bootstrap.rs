@@ -6,7 +6,6 @@ use crate::ports::outbound::account_source::AccountSource;
 use crate::ports::outbound::order_executor::OrderExecutor;
 use crate::ports::outbound::order_repository::OrderRepository;
 use crate::ports::outbound::position_repository::PositionRepository;
-use std::future::Future;
 use tracing::{info, warn};
 
 #[derive(Debug, thiserror::Error)]
@@ -15,27 +14,6 @@ pub enum BootstrapError {
     AccountSync(String),
     #[error("주문 동기화 실패: {0}")]
     OrderSync(String),
-}
-
-/// 최대 `retries`회 지수 백오프로 재시도하는 비동기 헬퍼.
-async fn retry<F, Fut, T, E>(retries: u32, mut f: F) -> Result<T, E>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-{
-    let mut attempt = 0;
-    loop {
-        match f().await {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                if attempt >= retries {
-                    return Err(e);
-                }
-                attempt += 1;
-                tokio::time::sleep(std::time::Duration::from_secs(1 << attempt)).await;
-            }
-        }
-    }
 }
 
 /// 계정 스냅샷 조회 + 오픈 주문 정합 + PendingSubmit 재조정 + 포지션 동기화 + 레버리지/마진 설정을 수행한다.
@@ -48,7 +26,8 @@ pub async fn bootstrap(
     symbols: &[String],
     symbol_configs: &[SymbolConfig],
 ) -> Result<AccountSnapshot, BootstrapError> {
-    let snap = retry(3, || account_src.fetch_account())
+    let snap = account_src
+        .fetch_account()
         .await
         .map_err(|e| BootstrapError::AccountSync(e.to_string()))?;
     info!(
@@ -99,7 +78,7 @@ async fn sync_positions(
     position_repo: &dyn PositionRepository,
     instances: &[StrategyInstance],
 ) {
-    let exchange_positions = match retry(3, || account_src.fetch_positions()).await {
+    let exchange_positions = match account_src.fetch_positions().await {
         Ok(v) => v,
         Err(e) => {
             warn!(error = %e, "거래소 포지션 조회 실패 — 포지션 동기화 건너뜀");
