@@ -8,6 +8,7 @@ pub mod exchange_info_refresher;
 pub mod live_order_service;
 pub mod live_trader;
 pub mod market_data_collector;
+pub mod notification_formatter;
 pub mod order_execution_event;
 pub mod order_reconciler;
 pub mod outbox_order_service;

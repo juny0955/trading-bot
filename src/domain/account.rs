@@ -47,4 +47,8 @@ pub enum AccountError {
     Parse(String),
     #[error("재시도 초과: {0}")]
     Unavailable(String),
+    #[error("요청 초과 (429)")]
+    RateLimited,
+    #[error("IP 밴 (418)")]
+    IpBanned,
 }

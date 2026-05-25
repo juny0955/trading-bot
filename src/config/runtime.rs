@@ -70,6 +70,19 @@ impl Default for QuestDbRuntimeConfig {
 }
 
 impl RuntimeConfig {
+    /// DB의 `runtime_config` 행들로부터 설정을 빌드한다.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let rows = vec![
+    ///     ("trading".into(), "dry_run".into(), "true".into()),
+    ///     ("telegram".into(), "bot_token".into(), "abc".into()),
+    /// ];
+    /// let cfg = RuntimeConfig::from_rows(&rows);
+    /// assert!(cfg.trading.dry_run);
+    /// assert_eq!(cfg.telegram.bot_token, "abc");
+    /// ```
     pub fn from_rows(rows: &[(String, String, String)]) -> Self {
         let mut cfg = Self::default();
         for (cfg_type, key, value) in rows {

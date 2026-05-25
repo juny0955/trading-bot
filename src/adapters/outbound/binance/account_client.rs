@@ -58,7 +58,15 @@ impl BinanceAccountClient {
             .header("X-MBX-APIKEY", &self.api.api_key)
             .send()
             .await
-            .map_err(|e| AccountError::Network(e.to_string()))?
+            .map_err(|e| AccountError::Network(e.to_string()))?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(AccountError::RateLimited);
+        }
+        if status.as_u16() == 418 {
+            return Err(AccountError::IpBanned);
+        }
+        let resp = resp
             .error_for_status()
             .map_err(|e| AccountError::Network(e.to_string()))?;
         resp.json::<Value>()
@@ -72,6 +80,20 @@ impl BinanceAccountClient {
         for attempt in 0u32..3 {
             match self.signed_get(path).await {
                 Ok(v) => return Ok(v),
+                // IP 밴(418): 재시도해도 악화될 뿐 — 즉시 실패
+                Err(e @ AccountError::IpBanned) => {
+                    warn!(path, "IP 밴 — 재시도 중단");
+                    return Err(e);
+                }
+                // 요청 초과(429): 60초 대기 후 한 번만 재시도
+                Err(AccountError::RateLimited) if attempt == 0 => {
+                    warn!(path, "요청 초과(429) — 60초 대기");
+                    sleep(Duration::from_secs(60)).await;
+                    last = Some(AccountError::RateLimited);
+                }
+                Err(AccountError::RateLimited) => {
+                    return Err(AccountError::RateLimited);
+                }
                 Err(e) => {
                     warn!(path, attempt, error = %e, "계정 API 호출 실패 — 재시도");
                     last = Some(e);

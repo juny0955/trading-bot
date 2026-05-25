@@ -1,5 +1,6 @@
+use crate::application::notification_formatter::{format_fill, format_order_status};
 use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
-use crate::domain::order::{Fill, Order, OrderSide, OrderStatus};
+use crate::domain::order::{Fill, Order, OrderStatus};
 use crate::ports::fill_sink::FillSink;
 use crate::ports::order_repository::{OrderRepository, OrphanOrder};
 use crate::ports::outbound::notification_sink::NotificationSink;
@@ -130,7 +131,7 @@ impl AccountEventHandler {
                 error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
             }
             self.fill_sink.emit(fill.clone()).await;
-            self.notifier.send(format_fill_msg(&fill)).await;
+            self.notifier.send(format_fill(&fill)).await;
             info!(symbol = %order.symbol, side = ?fd.side, qty = %fd.qty, price = %fd.price, "Fill 수신");
         }
     }
@@ -153,7 +154,7 @@ impl AccountEventHandler {
                         OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
                     ) {
                         self.notifier
-                            .send(format_order_status_msg(&updated, status))
+                            .send(format_order_status(&updated))
                             .await;
                     }
                 }
@@ -186,41 +187,6 @@ fn apply_order_status(mut order: Order, event: &OrderExecutionEvent, status: Ord
     order
 }
 
-fn side_label(side: OrderSide) -> &'static str {
-    match side {
-        OrderSide::Buy => "LONG",
-        OrderSide::Sell => "SHORT",
-    }
-}
-
-fn format_fill_msg(fill: &Fill) -> String {
-    format!(
-        "✅ 체결\n{} · {}\n수량: {} @ {} USDT\n수수료: {} {}",
-        fill.symbol,
-        side_label(fill.side),
-        fill.qty,
-        fill.price,
-        fill.fee,
-        fill.fee_asset,
-    )
-}
-
-fn format_order_status_msg(order: &Order, status: OrderStatus) -> String {
-    let (icon, label) = match status {
-        OrderStatus::Cancelled => ("❌", "주문 취소"),
-        OrderStatus::Rejected => ("⚠️", "주문 거부"),
-        OrderStatus::Expired => ("⏱", "주문 만료"),
-        _ => ("ℹ️", "주문 상태 변경"),
-    };
-    format!(
-        "{} {} — {} {} {}",
-        icon,
-        label,
-        order.symbol,
-        side_label(order.side),
-        order.qty,
-    )
-}
 
 #[async_trait::async_trait]
 impl FillSink for Sender<Fill> {
