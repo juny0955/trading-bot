@@ -153,9 +153,7 @@ impl AccountEventHandler {
                         status,
                         OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
                     ) {
-                        self.notifier
-                            .send(format_order_status(&updated))
-                            .await;
+                        self.notifier.send(format_order_status(&updated)).await;
                     }
                 }
                 Err(e) => error!(error = %e, "ORDER_TRADE_UPDATE 주문 갱신 실패"),
@@ -186,7 +184,6 @@ fn apply_order_status(mut order: Order, event: &OrderExecutionEvent, status: Ord
     order.updated_at = Utc::now();
     order
 }
-
 
 #[async_trait::async_trait]
 impl FillSink for Sender<Fill> {

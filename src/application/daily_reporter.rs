@@ -43,7 +43,11 @@ impl DailyReporter {
             // 자정 도달 — 전날(지난 24시간) 체결 내역 조회
             let since = Utc::now() - Duration::hours(24);
             match self.repo.fills_since(since).await {
-                Ok(fills) => self.notifier.send(format_daily_summary(&fills, since)).await,
+                Ok(fills) => {
+                    self.notifier
+                        .send(format_daily_summary(&fills, since))
+                        .await
+                }
                 Err(e) => error!(error = %e, "일별 리포트 체결 조회 실패"),
             }
         }

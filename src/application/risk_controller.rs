@@ -63,14 +63,10 @@ impl RiskController {
         }
     }
 
-    /// 주문 요청의 사전 검증을 순서대로 수행한다.
+    /// 주문 요청의 사전 검증을 순서대로 수행하고, 수량이 조정된 `OrderRequest`를 반환한다.
     ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// risk.check(&order_request).await?;
-    /// ```
-    pub async fn check(&self, req: &OrderRequest) -> Result<(), RiskError> {
+    /// 포지션 한도 초과 시 거부 대신 남은 증거금만큼 수량을 줄여서 반환한다.
+    pub async fn check(&self, req: &OrderRequest) -> Result<OrderRequest, RiskError> {
         let limits = (*self.limits.load()).clone();
         let filters = self
             .filters_cache
@@ -79,11 +75,20 @@ impl RiskController {
 
         self.validate_filters(req, &filters)?;
         let est_notional = self.validate_margin(req, &limits, &filters)?;
-        self.validate_position_limit(req, &limits, est_notional)
+        let leverage = std::cmp::min(limits.max_leverage, filters.max_leverage);
+        let adjusted_qty = self
+            .validate_position_limit(req, &limits, est_notional, leverage, &filters)
             .await?;
-        self.validate_open_order_count(req, &limits).await?;
 
-        Ok(())
+        let mut final_req = req.clone();
+        if adjusted_qty != req.qty {
+            final_req.qty = adjusted_qty;
+            self.validate_filters(&final_req, &filters)?;
+            self.validate_margin(&final_req, &limits, &filters)?;
+        }
+
+        self.validate_open_order_count(&final_req, &limits).await?;
+        Ok(final_req)
     }
 
     fn validate_filters(
@@ -123,19 +128,37 @@ impl RiskController {
         req: &OrderRequest,
         limits: &RiskLimits,
         est_notional: Decimal,
-    ) -> Result<(), RiskError> {
+        leverage: u32,
+        filters: &SymbolFilters,
+    ) -> Result<Decimal, RiskError> {
         if req.reduce_only {
-            return Ok(());
+            return Ok(req.qty);
         }
+        let lev = Decimal::from(leverage.max(1));
         let current_notional = self.current_position_notional(req).await;
-        let projected = current_notional + est_notional;
-        if projected > limits.max_position_notional {
+        let current_margin = current_notional / lev;
+        let est_margin = est_notional / lev;
+        let max_margin = limits.max_position_notional;
+        let remaining_margin = max_margin - current_margin;
+
+        if remaining_margin <= Decimal::ZERO {
             return Err(RiskError::PositionLimitExceeded {
-                projected,
-                max: limits.max_position_notional,
+                projected: current_margin,
+                max: max_margin,
             });
         }
-        Ok(())
+
+        if est_margin <= remaining_margin {
+            return Ok(req.qty);
+        }
+
+        // 부분 체결: 남은 증거금에 맞게 수량 축소
+        let remaining_notional = remaining_margin * lev;
+        let adjusted_qty = floor_to_step(
+            req.qty * remaining_notional / est_notional,
+            filters.step_size,
+        );
+        Ok(adjusted_qty)
     }
 
     async fn validate_open_order_count(
@@ -192,6 +215,13 @@ impl RiskController {
             _ => Decimal::ZERO,
         }
     }
+}
+
+fn floor_to_step(qty: Decimal, step: Decimal) -> Decimal {
+    if step.is_zero() {
+        return qty;
+    }
+    (qty / step).floor() * step
 }
 
 /// 레버리지 기반 필요 증거금을 계산한다.

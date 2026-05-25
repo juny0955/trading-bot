@@ -1,7 +1,7 @@
 use crate::ports::outbound::notification_sink::NotificationSink;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tracing::error;
 

@@ -58,7 +58,7 @@ impl OrderService for OutboxOrderService {
     /// - 명확한 거부(InsufficientMargin 등): `Rejected`로 확정
     /// - 모호한 실패(네트워크 등): `PendingSubmit` 유지 → Reconciler가 정정
     async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
-        self.risk.check(&request).await.map_err(OrderError::from)?;
+        let request = self.risk.check(&request).await.map_err(OrderError::from)?;
 
         let (pending, req) = create_pending_order(request)?;
 
