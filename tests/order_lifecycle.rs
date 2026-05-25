@@ -11,6 +11,7 @@ use trading_bot::domain::account::ExchangePositionSnapshot;
 use trading_bot::domain::order::{Fill, Order, OrderRequest, OrderSide, OrderStatus, OrderType};
 use trading_bot::domain::position::StoredPosition;
 use trading_bot::ports::fill_sink::FillSink;
+use trading_bot::ports::outbound::notification_sink::NoopNotificationSink;
 use trading_bot::ports::outbound::order_repository::{
     OrderRepository, OrphanOrder, RepositoryError,
 };
@@ -125,6 +126,20 @@ impl OrderRepository for FakeOrderRepo {
             .unwrap()
             .retain(|o| o.exchange_order_id != exchange_order_id);
         Ok(())
+    }
+
+    async fn fills_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<Fill>, RepositoryError> {
+        Ok(self
+            .fills
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|f| f.filled_at >= since)
+            .cloned()
+            .collect())
     }
 }
 
@@ -271,7 +286,12 @@ async fn fill_event_records_fill_and_updates_position() {
     let order = new_order();
     repo.upsert_order(&order).await.unwrap();
 
-    let handler = AccountEventHandler::new(repo.clone(), position_repo.clone(), fill_sink.clone());
+    let handler = AccountEventHandler::new(
+        repo.clone(),
+        position_repo.clone(),
+        fill_sink.clone(),
+        Arc::new(NoopNotificationSink),
+    );
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let token = tokio_util::sync::CancellationToken::new();
@@ -323,7 +343,12 @@ async fn unknown_exchange_order_recorded_as_orphan() {
     let fill_sink = Arc::new(CaptureFillSink::default());
 
     // DB에 주문을 저장하지 않음 — exchange_order_id=99는 orphan이 된다
-    let handler = AccountEventHandler::new(repo.clone(), position_repo.clone(), fill_sink.clone());
+    let handler = AccountEventHandler::new(
+        repo.clone(),
+        position_repo.clone(),
+        fill_sink.clone(),
+        Arc::new(NoopNotificationSink),
+    );
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let token = tokio_util::sync::CancellationToken::new();

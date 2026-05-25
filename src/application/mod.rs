@@ -3,6 +3,7 @@ pub mod account_event_handler;
 pub mod account_state;
 pub mod account_state_refresher;
 pub mod backtest;
+pub mod daily_reporter;
 pub mod exchange_info_refresher;
 pub mod live_order_service;
 pub mod live_trader;

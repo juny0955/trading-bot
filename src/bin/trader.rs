@@ -14,9 +14,11 @@ use trading_bot::adapters::outbound::binance::exchange_info_client::BinanceExcha
 use trading_bot::adapters::outbound::binance::order::executor::BinanceOrderExecutor;
 use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
 use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
+use trading_bot::adapters::outbound::telegram::notifier::TelegramNotifier;
 use trading_bot::application::account_bootstrap;
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::account_state_refresher::AccountStateRefresher;
+use trading_bot::application::daily_reporter::DailyReporter;
 use trading_bot::application::exchange_info_refresher::ExchangeInfoRefresher;
 use trading_bot::application::live_trader::LiveTrader;
 use trading_bot::application::order_reconciler::OrderReconciler;
@@ -29,6 +31,7 @@ use trading_bot::ports::fill_sink::FillSink;
 use trading_bot::ports::order_executor::OrderExecutor;
 use trading_bot::ports::order_repository::OrderRepository;
 use trading_bot::ports::order_service::OrderService;
+use trading_bot::ports::outbound::notification_sink::{NoopNotificationSink, NotificationSink};
 use trading_bot::ports::trading_use_case::TradingUseCase;
 
 struct LogFillSink;
@@ -107,10 +110,23 @@ async fn main() -> Result<()> {
 
     let (event_tx, event_rx) = mpsc::channel(256);
     let fill_sink = Arc::new(LogFillSink);
+
+    // bot_token이 설정돼 있으면 텔레그램 알리미, 없으면 Noop 사용
+    let notifier: Arc<dyn NotificationSink> = {
+        let tg = &boot.config.runtime.telegram;
+        if !tg.bot_token.is_empty() && !tg.chat_id.is_empty() {
+            info!("텔레그램 알림 활성화");
+            Arc::new(TelegramNotifier::new(&tg.bot_token, &tg.chat_id))
+        } else {
+            Arc::new(NoopNotificationSink)
+        }
+    };
+
     let handler = Arc::new(AccountEventHandler::new(
         repo.clone(),
         boot.position_repo.clone(),
         fill_sink,
+        notifier.clone(),
     ));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
     let order_loop = OrderWsLoop::new(api);
@@ -121,8 +137,13 @@ async fn main() -> Result<()> {
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
     ));
-    let reconciler =
-        OrderReconciler::new(order_svc, executor, repo, boot.risk_limits.clone(), symbols);
+    let reconciler = OrderReconciler::new(
+        order_svc,
+        executor,
+        repo.clone(),
+        boot.risk_limits.clone(),
+        symbols,
+    );
     let info_refresher =
         ExchangeInfoRefresher::new(exchange_info_client, boot.filters_cache.clone());
     let account_refresher = AccountStateRefresher::new(account_client, boot.account_state.clone());
@@ -165,6 +186,11 @@ async fn main() -> Result<()> {
         tokio::spawn({
             let token = token.clone();
             async move { account_refresher.run(token).await }
+        }),
+        tokio::spawn({
+            let token = token.clone();
+            let reporter = DailyReporter::new(repo.clone(), notifier);
+            async move { reporter.run(token).await }
         }),
     ];
 

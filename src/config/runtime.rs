@@ -4,6 +4,14 @@ pub struct RuntimeConfig {
     pub alternative: AlternativeRuntimeConfig,
     pub questdb: QuestDbRuntimeConfig,
     pub trading: TradingRuntimeConfig,
+    pub telegram: TelegramRuntimeConfig,
+}
+
+/// 텔레그램 봇 설정. `bot_token`이 비어 있으면 알림이 비활성화된다.
+#[derive(Debug, Clone, Default)]
+pub struct TelegramRuntimeConfig {
+    pub bot_token: String,
+    pub chat_id: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +78,7 @@ impl RuntimeConfig {
                 "alternative" => cfg.alternative_rows(key, value),
                 "questdb" => cfg.questdb_rows(key, value),
                 "trading" => cfg.trading_rows(key, value),
+                "telegram" => cfg.telegram_rows(key, value),
                 _ => {}
             }
         }
@@ -105,6 +114,14 @@ impl RuntimeConfig {
         match key {
             "live_trading_enabled" => parse(value, &mut self.trading.live_trading_enabled),
             "dry_run" => parse(value, &mut self.trading.dry_run),
+            _ => {}
+        }
+    }
+
+    fn telegram_rows(&mut self, key: &str, value: &str) {
+        match key {
+            "bot_token" => self.telegram.bot_token = value.to_string(),
+            "chat_id" => self.telegram.chat_id = value.to_string(),
             _ => {}
         }
     }

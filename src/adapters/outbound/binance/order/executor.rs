@@ -450,11 +450,26 @@ mod tests {
 
     #[test]
     fn parse_order_status_known_variants() -> anyhow::Result<()> {
-        assert_eq!(parse_order_status(Some("FILLED")), Some(OrderStatus::Filled));
-        assert_eq!(parse_order_status(Some("CANCELED")), Some(OrderStatus::Cancelled));
-        assert_eq!(parse_order_status(Some("PARTIALLY_FILLED")), Some(OrderStatus::PartiallyFilled));
-        assert_eq!(parse_order_status(Some("EXPIRED")), Some(OrderStatus::Expired));
-        assert_eq!(parse_order_status(Some("REJECTED")), Some(OrderStatus::Rejected));
+        assert_eq!(
+            parse_order_status(Some("FILLED")),
+            Some(OrderStatus::Filled)
+        );
+        assert_eq!(
+            parse_order_status(Some("CANCELED")),
+            Some(OrderStatus::Cancelled)
+        );
+        assert_eq!(
+            parse_order_status(Some("PARTIALLY_FILLED")),
+            Some(OrderStatus::PartiallyFilled)
+        );
+        assert_eq!(
+            parse_order_status(Some("EXPIRED")),
+            Some(OrderStatus::Expired)
+        );
+        assert_eq!(
+            parse_order_status(Some("REJECTED")),
+            Some(OrderStatus::Rejected)
+        );
         // 알 수 없는 상태는 None
         assert_eq!(parse_order_status(Some("UNKNOWN_STATE")), None);
         assert_eq!(parse_order_status(None), None);

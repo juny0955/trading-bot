@@ -1,5 +1,6 @@
 use crate::domain::order::{Fill, Order, OrderError, OrderStatus};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -45,4 +46,6 @@ pub trait OrderRepository: Send + Sync {
     async fn record_orphan(&self, orphan: &OrphanOrder) -> Result<(), RepositoryError>;
     async fn find_orphans(&self, limit: i64) -> Result<Vec<OrphanOrder>, RepositoryError>;
     async fn delete_orphan(&self, exchange_order_id: i64) -> Result<(), RepositoryError>;
+    /// `since` 이후의 체결 내역을 `filled_at` 오름차순으로 반환한다. 일별 요약에 사용한다.
+    async fn fills_since(&self, since: DateTime<Utc>) -> Result<Vec<Fill>, RepositoryError>;
 }

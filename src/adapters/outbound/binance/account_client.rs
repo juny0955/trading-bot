@@ -140,11 +140,7 @@ fn build_post_body_and_url(
 }
 
 /// 타임스탬프·서명이 포함된 GET 요청 URL을 구성한다.
-fn build_get_url(
-    secret: &str,
-    rest_base: &str,
-    path: &str,
-) -> Result<String, AccountError> {
+fn build_get_url(secret: &str, rest_base: &str, path: &str) -> Result<String, AccountError> {
     let ts = signing::timestamp_ms().map_err(|e| AccountError::Network(e.to_string()))?;
     let query = format!("timestamp={ts}&recvWindow=5000");
     let sig = signing::sign(secret, &query).map_err(|e| AccountError::Network(e.to_string()))?;

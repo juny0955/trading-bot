@@ -204,6 +204,24 @@ impl OrderRepository for PostgresOrderRepository {
             .await?;
         Ok(())
     }
+
+    async fn fills_since(&self, since: DateTime<Utc>) -> Result<Vec<Fill>, RepositoryError> {
+        Ok(sqlx::query_as::<_, DbFill>(
+            r#"
+            SELECT order_id, strategy_instance_id, symbol, side,
+                   qty, price, fee, fee_asset, filled_at, exchange_trade_id
+            FROM fills
+            WHERE filled_at >= $1
+            ORDER BY filled_at
+            "#,
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+    }
 }
 
 impl PostgresOrderRepository {
