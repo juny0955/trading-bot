@@ -2,6 +2,7 @@ use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::domain::backtest::{Bar, DepthSnapshot};
 use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
+use crate::domain::order::{OrderRequest, OrderType};
 use crate::domain::position::Position;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
 use crate::ports::market_data_provider::MarketDataProvider;
@@ -187,6 +188,36 @@ async fn dispatch(
         match cmd {
             StrategyCommand::SubmitOrder(req) => {
                 submit_order_command(svc, instance_id, symbol, req).await
+            }
+            StrategyCommand::SetStopLoss {
+                side,
+                qty,
+                stop_price,
+            } => {
+                let req = OrderRequest {
+                    order_type: OrderType::StopMarket,
+                    side,
+                    qty,
+                    stop_price: Some(stop_price),
+                    reduce_only: true,
+                    ..Default::default()
+                };
+                submit_order_command(svc, instance_id, symbol, req).await;
+            }
+            StrategyCommand::SetTakeProfit {
+                side,
+                qty,
+                stop_price,
+            } => {
+                let req = OrderRequest {
+                    order_type: OrderType::StopMarket,
+                    side,
+                    qty,
+                    stop_price: Some(stop_price),
+                    reduce_only: true,
+                    ..Default::default()
+                };
+                submit_order_command(svc, instance_id, symbol, req).await;
             }
         }
     }

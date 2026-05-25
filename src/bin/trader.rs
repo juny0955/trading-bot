@@ -92,11 +92,10 @@ async fn main() -> Result<()> {
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
     ));
-    let order_svc: Arc<dyn OrderService> = Arc::new(OutboxOrderService::new(
-        executor.clone(),
-        repo.clone(),
-        risk,
-    ));
+    let order_svc: Arc<dyn OrderService> = Arc::new(
+        OutboxOrderService::new(executor.clone(), repo.clone(), risk)
+            .with_dry_run(boot.config.runtime.trading.dry_run),
+    );
 
     let strategies = build_strategies(&instances)?;
     info!(total_entries = strategies.len(), "트레이더 시작");

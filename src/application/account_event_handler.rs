@@ -71,7 +71,10 @@ impl AccountEventHandler {
         loop {
             tokio::select! {
                 _ = token.cancelled() => return,
-                Some(event) = rx.recv() => self.handle(event).await,
+                event = rx.recv() => match event {
+                    Some(e) => self.handle(e).await,
+                    None => return,
+                },
             }
         }
     }

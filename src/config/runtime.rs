@@ -10,6 +10,8 @@ pub struct RuntimeConfig {
 pub struct TradingRuntimeConfig {
     /// mainnet 실거래 arming flag. false이면 주문 전송 불가.
     pub live_trading_enabled: bool,
+    /// true이면 위험 검증만 수행하고 실제 주문 전송·DB 기록을 건너뜀.
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,8 +102,10 @@ impl RuntimeConfig {
     }
 
     fn trading_rows(&mut self, key: &str, value: &str) {
-        if key == "live_trading_enabled" {
-            parse(value, &mut self.trading.live_trading_enabled)
+        match key {
+            "live_trading_enabled" => parse(value, &mut self.trading.live_trading_enabled),
+            "dry_run" => parse(value, &mut self.trading.dry_run),
+            _ => {}
         }
     }
 }

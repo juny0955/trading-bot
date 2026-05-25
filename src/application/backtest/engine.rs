@@ -305,6 +305,8 @@ async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyComma
             StrategyCommand::SubmitOrder(req) => {
                 executor.submit(req).await?;
             }
+            // 백테스트에서는 stop-loss/take-profit 주문을 시뮬레이션하지 않는다.
+            StrategyCommand::SetStopLoss { .. } | StrategyCommand::SetTakeProfit { .. } => {}
         }
     }
     Ok(())

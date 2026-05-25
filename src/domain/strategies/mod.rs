@@ -54,6 +54,18 @@ pub struct Context {
 /// ```
 pub enum StrategyCommand {
     SubmitOrder(OrderRequest),
+    /// 포지션 손절 주문: `side`·`qty`·`stop_price`로 STOP_MARKET reduce-only 주문을 제출한다.
+    SetStopLoss {
+        side: OrderSide,
+        qty: Decimal,
+        stop_price: Decimal,
+    },
+    /// 포지션 익절 주문: `side`·`qty`·`stop_price`로 STOP_MARKET reduce-only 주문을 제출한다.
+    SetTakeProfit {
+        side: OrderSide,
+        qty: Decimal,
+        stop_price: Decimal,
+    },
 }
 
 /// 실시간 및 백테스트 엔진에서 호출하는 전략 인터페이스입니다.

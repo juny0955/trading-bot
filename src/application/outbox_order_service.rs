@@ -5,7 +5,7 @@ use crate::ports::outbound::order_repository::OrderRepository;
 use crate::ports::outbound::order_service::OrderService;
 use async_trait::async_trait;
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 impl From<RiskError> for OrderError {
@@ -25,6 +25,7 @@ pub struct OutboxOrderService {
     executor: Arc<dyn OrderExecutor>,
     repo: Arc<dyn OrderRepository>,
     risk: Arc<RiskController>,
+    dry_run: bool,
 }
 
 impl OutboxOrderService {
@@ -38,7 +39,14 @@ impl OutboxOrderService {
             executor,
             repo,
             risk,
+            dry_run: false,
         }
+    }
+
+    /// dry_run 모드를 설정한다. true이면 위험 검증만 수행하고 실제 전송을 건너뜀.
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
     }
 }
 
@@ -53,6 +61,18 @@ impl OrderService for OutboxOrderService {
         self.risk.check(&request).await.map_err(OrderError::from)?;
 
         let (pending, req) = create_pending_order(request)?;
+
+        if self.dry_run {
+            info!(
+                client_order_id = %pending.client_order_id,
+                symbol = %pending.symbol,
+                side = ?pending.side,
+                qty = %pending.qty,
+                "DRY RUN — 주문 전송 건너뜀"
+            );
+            return Ok(pending);
+        }
+
         self.repo.upsert_order(&pending).await?;
 
         match self.executor.submit(req).await {
