@@ -272,6 +272,19 @@ impl Default for FilterConfig {
 }
 
 impl FilterConfig {
+    /// JSON `Value`에서 `FilterConfig`를 파싱합니다. 누락된 키는 `Default` 값으로 채웁니다.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use trading_bot::domain::strategies::market_filter::FilterConfig;
+    /// use rust_decimal_macros::dec;
+    ///
+    /// let config = FilterConfig::from_params(&serde_json::json!({"sl_atr_mult": "2.0"})).unwrap();
+    /// assert_eq!(config.sl_atr_mult, dec!(2.0));
+    /// // 나머지 필드는 Default로 채워짐
+    /// assert_eq!(config.atr_period, 14);
+    /// ```
     pub fn from_params(v: &Value) -> Result<Self> {
         let d = Self::default();
         Ok(Self {
@@ -344,6 +357,9 @@ pub struct MarketFilter {
 }
 
 impl MarketFilter {
+    /// 내부 전략을 래핑하여 장세 필터와 ATR 기반 포지션 사이징을 적용하는 `MarketFilter`를 생성합니다.
+    ///
+    /// `config`의 각 주기 파라미터로 ATR/ADX/EMA 계산기를 초기화합니다.
     pub fn new(inner: Box<dyn Strategy>, config: FilterConfig) -> Self {
         let atr = AtrCalc::new(config.atr_period);
         let adx = AdxCalc::new(config.adx_period);

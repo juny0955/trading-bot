@@ -65,6 +65,7 @@ pub struct TradeManager {
 }
 
 impl TradeManager {
+    /// 빈 상태의 `TradeManager`를 생성합니다.
     pub fn new() -> Self {
         Self {
             states: RwLock::new(HashMap::new()),
@@ -100,6 +101,7 @@ impl TradeManager {
         self.entry_atrs.write().await.insert(key.clone(), atr);
     }
 
+    /// 포지션 진입 시 저장된 ATR 값을 조회합니다.
     pub async fn get_entry_atr(&self, key: &PositionKey) -> Option<Decimal> {
         self.entry_atrs.read().await.get(key).copied()
     }
@@ -172,6 +174,7 @@ impl TradeManager {
         }
     }
 
+    /// 현재 포지션의 runtime state를 조회합니다.
     pub async fn get_state(&self, key: &PositionKey) -> Option<PositionRuntimeState> {
         self.states.read().await.get(key).cloned()
     }

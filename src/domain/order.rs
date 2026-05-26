@@ -406,12 +406,7 @@ fn validate_required_positive(name: &str, value: Option<Decimal>) -> Result<(), 
 }
 
 fn validate_positive(name: &str, value: Decimal) -> Result<(), OrderError> {
-    if value <= Decimal::ZERO {
-        return Err(OrderError::InvalidRequest(format!(
-            "{name} must be positive"
-        )));
-    }
-    Ok(())
+    crate::domain::validation::check_positive(name, value).map_err(OrderError::InvalidRequest)
 }
 
 impl TryFrom<&Order> for ExchangeOpenOrder {

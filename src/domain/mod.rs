@@ -8,3 +8,4 @@ pub mod order;
 pub mod position;
 pub mod strategies;
 pub mod trade_decision;
+pub(crate) mod validation;

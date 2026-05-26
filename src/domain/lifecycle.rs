@@ -4,13 +4,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+/// 포지션 방향입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::lifecycle::LifecycleSide;
+///
+/// let side = LifecycleSide::Long;
+/// assert_eq!(format!("{side:?}"), "Long");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LifecycleSide {
+    /// 매수(롱) 포지션.
     Long,
+    /// 매도(숏) 포지션.
     Short,
 }
 
 /// 포지션 생애주기 (진입~청산 하나의 거래 단위).
+///
+/// 전략 인스턴스가 특정 심볼에서 진입하여 청산하는 흐름을 추적합니다.
+/// 체결(Fill)이 귀속되고, 실현 손익·수수료·MFE/MAE가 누적됩니다.
 #[derive(Debug, Clone)]
 pub struct PositionLifecycle {
     pub id: Uuid,
@@ -128,9 +143,21 @@ pub struct UnresolvedFill {
     pub updated_at: DateTime<Utc>,
 }
 
+/// lifecycle 매핑 실패 체결의 처리 상태입니다.
+///
+/// # Examples
+///
+/// ```
+/// use trading_bot::domain::lifecycle::UnresolvedStatus;
+///
+/// assert_ne!(UnresolvedStatus::Pending, UnresolvedStatus::Dead);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnresolvedStatus {
+    /// 재시도 대기 중.
     Pending,
+    /// lifecycle에 매핑 완료.
     Resolved,
+    /// 최대 재시도 초과 — 수동 처리 필요.
     Dead,
 }

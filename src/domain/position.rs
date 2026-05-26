@@ -134,14 +134,8 @@ impl Position {
 fn validate_fill(fill: &Fill) -> Result<(), PositionError> {
     validate_fill_positive("qty", fill.qty)?;
     validate_fill_positive("price", fill.price)?;
-
-    if fill.fee < Decimal::ZERO {
-        return Err(PositionError::InvalidFill(
-            "fee must not be negative".into(),
-        ));
-    }
-
-    Ok(())
+    crate::domain::validation::check_non_negative("fee", fill.fee)
+        .map_err(PositionError::InvalidFill)
 }
 
 fn validate_position(position: &Position) -> Result<(), PositionError> {
@@ -163,21 +157,11 @@ fn validate_open_position(position: &Position) -> Result<(), PositionError> {
 }
 
 fn validate_fill_positive(name: &str, value: Decimal) -> Result<(), PositionError> {
-    if value <= Decimal::ZERO {
-        return Err(PositionError::InvalidFill(format!(
-            "{name} must be positive"
-        )));
-    }
-    Ok(())
+    crate::domain::validation::check_positive(name, value).map_err(PositionError::InvalidFill)
 }
 
 fn validate_position_positive(name: &str, value: Decimal) -> Result<(), PositionError> {
-    if value <= Decimal::ZERO {
-        return Err(PositionError::InvalidPosition(format!(
-            "{name} must be positive"
-        )));
-    }
-    Ok(())
+    crate::domain::validation::check_positive(name, value).map_err(PositionError::InvalidPosition)
 }
 
 fn apply_valid_fill(position: Position, fill: &Fill) -> (Position, PositionAction) {

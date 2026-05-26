@@ -279,34 +279,12 @@ impl LiveTrader {
         qty: Decimal,
         stop_price: Decimal,
     ) {
-        let active_lid = self
-            .lifecycle_tracker
-            .get_active_lifecycle(instance_id, symbol)
-            .await;
-        let req = prepare_order_request(
-            OrderRequest {
-                order_type: OrderType::StopMarket,
-                side,
-                qty,
-                stop_price: Some(stop_price),
-                reduce_only: true,
-                ..Default::default()
-            },
-            instance_id,
-            symbol,
-        );
-        let order_side = req.side;
-        let order_qty = req.qty;
-        match self.order_svc.submit(req).await {
-            Ok(order) => {
-                info!(id = %order.id, instance_id, symbol, ?order_side, %order_qty, "SL 주문 제출");
-                if let Some(lid) = active_lid {
-                    self.lifecycle_tracker.register_order(order.id, lid).await;
-                }
-                let key: PositionKey = (instance_id, symbol.to_string());
-                self.trade_manager.set_sl_order(&key, Some(order.id)).await;
-            }
-            Err(e) => error!(error = %e, instance_id, symbol, "SL 주문 실패"),
+        if let Some(order_id) = self
+            .submit_protective_order(instance_id, symbol, side, qty, stop_price, "SL 주문")
+            .await
+        {
+            let key: PositionKey = (instance_id, symbol.to_string());
+            self.trade_manager.set_sl_order(&key, Some(order_id)).await;
         }
     }
 
@@ -318,6 +296,21 @@ impl LiveTrader {
         qty: Decimal,
         stop_price: Decimal,
     ) {
+        self.submit_protective_order(instance_id, symbol, side, qty, stop_price, "TP 주문")
+            .await;
+    }
+
+    /// StopMarket 보호 주문(SL/TP)을 제출하는 공통 헬퍼입니다.
+    /// 성공 시 주문 ID를, 실패 시 `None`을 반환합니다.
+    async fn submit_protective_order(
+        &self,
+        instance_id: i64,
+        symbol: &str,
+        side: OrderSide,
+        qty: Decimal,
+        stop_price: Decimal,
+        label: &str,
+    ) -> Option<Uuid> {
         let active_lid = self
             .lifecycle_tracker
             .get_active_lifecycle(instance_id, symbol)
@@ -338,12 +331,16 @@ impl LiveTrader {
         let order_qty = req.qty;
         match self.order_svc.submit(req).await {
             Ok(order) => {
-                info!(id = %order.id, instance_id, symbol, ?order_side, %order_qty, "TP 주문 제출");
+                info!(id = %order.id, instance_id, symbol, ?order_side, %order_qty, "{label} 제출");
                 if let Some(lid) = active_lid {
                     self.lifecycle_tracker.register_order(order.id, lid).await;
                 }
+                Some(order.id)
             }
-            Err(e) => error!(error = %e, instance_id, symbol, "TP 주문 실패"),
+            Err(e) => {
+                error!(error = %e, instance_id, symbol, "{label} 실패");
+                None
+            }
         }
     }
 
