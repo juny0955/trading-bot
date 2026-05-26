@@ -36,6 +36,7 @@ pub trait LifecycleRepository: Send + Sync {
     ) -> Result<(), RepositoryError>;
 
     /// 청산 후 집계 데이터를 백필합니다 (OutcomeBackfiller 용).
+    #[allow(clippy::too_many_arguments)]
     async fn backfill_close(
         &self,
         id: Uuid,

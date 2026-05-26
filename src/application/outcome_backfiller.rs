@@ -129,6 +129,7 @@ impl OutcomeBackfiller {
 
 impl OutcomeBackfiller {
     /// 청산 완료된 lifecycle의 집계 데이터를 fills에서 계산해 백필합니다.
+    #[allow(clippy::too_many_arguments)]
     pub async fn backfill_lifecycle(
         &self,
         lifecycle_id: Uuid,

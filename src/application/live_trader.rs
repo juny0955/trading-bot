@@ -43,6 +43,7 @@ pub struct LiveTrader {
 }
 
 impl LiveTrader {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         order_svc: Arc<dyn OrderService>,
         position_repo: Arc<dyn PositionRepository>,
