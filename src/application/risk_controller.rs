@@ -73,6 +73,12 @@ impl RiskController {
             .get(&req.symbol)
             .ok_or_else(|| RiskError::UnknownSymbol(req.symbol.clone()))?;
 
+        // 비율 계산 결과(부분 익절 등)가 stepSize에 정렬되지 않을 수 있으므로 내림 정렬한다.
+        let req = &OrderRequest {
+            qty: floor_to_step(req.qty, filters.step_size),
+            ..req.clone()
+        };
+
         // 1단계: 거래소 필터(수량 최솟값, stepSize, tickSize, minNotional) 검증
         self.validate_filters(req, &filters)?;
         // 2단계: 증거금 충분성 검증. 추정 명목가를 반환해 이후 단계에서 재사용한다.
@@ -301,5 +307,15 @@ mod tests {
         let req = market_req(OrderSide::Buy, dec!(5));
         let notional = estimate_market_notional(&req, &bt, 0);
         assert_eq!(notional, dec!(500));
+    }
+
+    #[test]
+    fn floor_to_step_aligns_partial_tp_qty() {
+        // 부분 익절 수량 0.154 × 0.3 = 0.0462 → stepSize 0.001 → 0.046
+        assert_eq!(floor_to_step(dec!(0.0462), dec!(0.001)), dec!(0.046));
+        // 이미 정렬된 수량은 그대로
+        assert_eq!(floor_to_step(dec!(0.046), dec!(0.001)), dec!(0.046));
+        // step=0이면 원본 반환
+        assert_eq!(floor_to_step(dec!(0.0462), dec!(0)), dec!(0.0462));
     }
 }
