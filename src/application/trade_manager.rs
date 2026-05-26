@@ -26,6 +26,8 @@ pub struct TradeManagerParams {
     pub trigger_mult: Decimal,
     /// cancel ACK 후 새 SL 미체결 허용 최대 시간 초 (기본 30)
     pub unprotected_limit_secs: i64,
+    /// 지정가 진입 타임아웃 후 시장가 전환 (초, 기본 10)
+    pub limit_timeout_secs: u64,
 }
 
 impl Default for TradeManagerParams {
@@ -38,6 +40,7 @@ impl Default for TradeManagerParams {
             throttle_secs: 1.0,
             trigger_mult: dec!(0.2),
             unprotected_limit_secs: 30,
+            limit_timeout_secs: 10,
         }
     }
 }

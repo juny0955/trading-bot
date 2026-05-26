@@ -17,6 +17,7 @@ use trading_bot::adapters::outbound::postgres::postgres_decision_repository::Pos
 use trading_bot::adapters::outbound::postgres::postgres_lifecycle_repository::PostgresLifecycleRepository;
 use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
 use trading_bot::application::decision_logger::DecisionLogger;
+use trading_bot::application::limit_order_monitor::LimitOrderMonitor;
 use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use trading_bot::application::trade_manager::{TradeManager, TradeManagerParams};
 use trading_bot::adapters::outbound::telegram::notifier::TelegramNotifier;
@@ -133,6 +134,7 @@ async fn main() -> Result<()> {
     let decision_repo = Arc::new(PostgresDecisionRepository::new(boot.pool.clone()));
     let decision_logger = Arc::new(DecisionLogger::new(decision_repo));
     let trade_manager = Arc::new(TradeManager::new());
+    let limit_monitor = Arc::new(LimitOrderMonitor::new());
 
     let handler = Arc::new(AccountEventHandler::new(
         repo.clone(),
@@ -153,6 +155,7 @@ async fn main() -> Result<()> {
         trade_manager,
         lifecycle_tracker,
         decision_logger,
+        limit_monitor,
         TradeManagerParams::default(),
     ));
     let reconciler = OrderReconciler::new(

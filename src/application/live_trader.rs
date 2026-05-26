@@ -1,6 +1,7 @@
 use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::application::account_state::AccountState;
 use crate::application::decision_logger::DecisionLogger;
+use crate::application::limit_order_monitor::LimitOrderMonitor;
 use crate::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use crate::application::trade_manager::{PositionKey, TradeManager, TradeManagerParams};
 use crate::domain::backtest::{Bar, DepthSnapshot};
@@ -37,6 +38,7 @@ pub struct LiveTrader {
     trade_manager: Arc<TradeManager>,
     lifecycle_tracker: Arc<PositionLifecycleTracker>,
     decision_logger: Arc<DecisionLogger>,
+    limit_monitor: Arc<LimitOrderMonitor>,
     tm_params: TradeManagerParams,
 }
 
@@ -49,6 +51,7 @@ impl LiveTrader {
         trade_manager: Arc<TradeManager>,
         lifecycle_tracker: Arc<PositionLifecycleTracker>,
         decision_logger: Arc<DecisionLogger>,
+        limit_monitor: Arc<LimitOrderMonitor>,
         tm_params: TradeManagerParams,
     ) -> Self {
         Self {
@@ -59,6 +62,7 @@ impl LiveTrader {
             trade_manager,
             lifecycle_tracker,
             decision_logger,
+            limit_monitor,
             tm_params,
         }
     }
@@ -196,6 +200,7 @@ impl LiveTrader {
     async fn dispatch_submit(&self, instance_id: i64, symbol: &str, req: OrderRequest) {
         let is_opening = !req.reduce_only;
         let entry_side = req.side;
+        let is_limit = req.order_type == OrderType::Limit;
 
         // 신규 진입 주문 시 lifecycle 열기
         let lifecycle_id: Option<Uuid> = if is_opening {
@@ -220,6 +225,7 @@ impl LiveTrader {
         let req = prepare_order_request(req, instance_id, symbol);
         let side = req.side;
         let qty = req.qty;
+        let market_replace = to_market_order(req.clone());
         match self.order_svc.submit(req).await {
             Ok(order) => {
                 info!(id = %order.id, instance_id, symbol, ?side, %qty, "주문 제출");
@@ -229,8 +235,19 @@ impl LiveTrader {
                 if is_opening {
                     let key: PositionKey = (instance_id, symbol.to_string());
                     self.trade_manager
-                        .init_position(key, PositionRuntimeState::default(), None)
+                        .init_position(key.clone(), PositionRuntimeState::default(), None)
                         .await;
+                    if is_limit {
+                        self.limit_monitor
+                            .register(
+                                order.id,
+                                self.tm_params.limit_timeout_secs,
+                                market_replace,
+                                lifecycle_id,
+                                key,
+                            )
+                            .await;
+                    }
                 }
             }
             Err(e) => error!(error = %e, instance_id, symbol, ?side, %qty, "주문 실패"),
@@ -314,6 +331,11 @@ impl LiveTrader {
         if mid.is_zero() {
             return;
         }
+
+        // 지정가 타임아웃 주문 처리
+        self.limit_monitor
+            .check_timeouts(&self.order_svc, &self.lifecycle_tracker, &self.trade_manager)
+            .await;
 
         for key in keys {
             let instance_id = key.0;
@@ -591,6 +613,12 @@ fn prepare_order_request(
     if req.symbol.is_empty() {
         req.symbol = symbol.to_string();
     }
+    req
+}
+
+fn to_market_order(mut req: OrderRequest) -> OrderRequest {
+    req.order_type = OrderType::Market;
+    req.price = None;
     req
 }
 
