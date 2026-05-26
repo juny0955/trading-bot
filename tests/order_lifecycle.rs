@@ -7,16 +7,43 @@ use rust_decimal_macros::dec;
 use std::sync::{Arc, Mutex};
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::order_execution_event::{FillData, OrderExecutionEvent};
+use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use trading_bot::domain::account::ExchangePositionSnapshot;
+use trading_bot::domain::lifecycle::{LifecycleSide, PositionLifecycle, UnresolvedFill};
 use trading_bot::domain::order::{Fill, Order, OrderRequest, OrderSide, OrderStatus, OrderType};
 use trading_bot::domain::position::{PositionAction, StoredPosition};
 use trading_bot::ports::fill_sink::FillSink;
+use trading_bot::ports::outbound::lifecycle_repository::LifecycleRepository;
 use trading_bot::ports::outbound::notification_sink::NoopNotificationSink;
 use trading_bot::ports::outbound::order_repository::{
     OrderRepository, OrphanOrder, RepositoryError,
 };
 use trading_bot::ports::outbound::position_repository::PositionRepository;
+use rust_decimal::Decimal;
+use serde_json::Value;
 use uuid::Uuid;
+
+struct NoopLifecycleRepo;
+
+#[async_trait]
+impl LifecycleRepository for NoopLifecycleRepo {
+    async fn open(&self, _: i64, _: &str, _: LifecycleSide, _: Option<Decimal>) -> Result<Uuid, RepositoryError> {
+        Ok(Uuid::nil())
+    }
+    async fn close(&self, _: Uuid) -> Result<(), RepositoryError> { Ok(()) }
+    async fn find_open(&self, _: i64, _: &str) -> Result<Option<PositionLifecycle>, RepositoryError> { Ok(None) }
+    async fn update_water_marks(&self, _: Uuid, _: Option<Decimal>, _: Option<Decimal>) -> Result<(), RepositoryError> { Ok(()) }
+    async fn backfill_close(&self, _: Uuid, _: Decimal, _: Decimal, _: Decimal, _: Decimal, _: Option<Decimal>, _: Option<Decimal>) -> Result<(), RepositoryError> { Ok(()) }
+    async fn save_unresolved(&self, _: Option<i64>, _: Value, _: &str) -> Result<(), RepositoryError> { Ok(()) }
+    async fn find_unresolved_pending(&self, _: i64) -> Result<Vec<UnresolvedFill>, RepositoryError> { Ok(vec![]) }
+    async fn mark_unresolved_resolved(&self, _: Uuid) -> Result<(), RepositoryError> { Ok(()) }
+    async fn mark_unresolved_dead(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> { Ok(()) }
+    async fn increment_unresolved_retry(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> { Ok(()) }
+}
+
+fn noop_lifecycle_tracker() -> Arc<PositionLifecycleTracker> {
+    Arc::new(PositionLifecycleTracker::new(Arc::new(NoopLifecycleRepo)))
+}
 
 // ──────────────────────────────────────────────
 // In-memory fakes
@@ -287,11 +314,17 @@ async fn fill_event_records_fill_and_updates_position() {
     let order = new_order();
     repo.upsert_order(&order).await.unwrap();
 
+    // LiveTrader는 주문 제출 후 lifecycle_id를 등록한다.
+    // 테스트에서도 동일하게 등록해야 fill이 fills 테이블로 라우팅된다.
+    let tracker = noop_lifecycle_tracker();
+    tracker.register_order(order.id, Uuid::nil()).await;
+
     let handler = AccountEventHandler::new(
         repo.clone(),
         position_repo.clone(),
         fill_sink.clone(),
         Arc::new(NoopNotificationSink),
+        tracker,
     );
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -349,6 +382,7 @@ async fn unknown_exchange_order_recorded_as_orphan() {
         position_repo.clone(),
         fill_sink.clone(),
         Arc::new(NoopNotificationSink),
+        noop_lifecycle_tracker(),
     );
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);

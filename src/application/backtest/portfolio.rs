@@ -150,6 +150,10 @@ impl Portfolio {
                 if let Some(fill) = self.close_at(order, price, ts_ns) {
                     fills.push(fill);
                 }
+                // reduce_only 주문은 반대 방향 재진입하지 않음
+                if order.reduce_only {
+                    return Ok(fills);
+                }
             }
             ExecutionAction::Open => {}
         }

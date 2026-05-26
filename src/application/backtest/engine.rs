@@ -149,11 +149,14 @@ async fn run_inner(
     let mut equity_curve = Vec::with_capacity(events.len());
     let mut last_depth: Option<&DepthSnapshot> = None;
     let depth_fresh_ns = cfg.depth_freshness_sec.saturating_mul(1_000_000_000);
+    // 현재 활성 SL 주문 ID (새 SL 설정 시 이전 주문 취소)
+    let mut current_sl: Option<uuid::Uuid> = None;
+    let mut current_tp: Option<uuid::Uuid> = None;
 
     {
         let ctx = make_ctx(&executor, events[0].ts_ns())?;
         let cmds = strategy.on_start(&ctx)?;
-        dispatch(&executor, cmds).await?;
+        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
     }
 
     for ev in events {
@@ -161,6 +164,11 @@ async fn run_inner(
         let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Buy);
         let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Sell);
         executor.drain_pending(buy_price, sell_price, ts)?;
+
+        // Bar 이벤트에서 고저가 기준으로 StopMarket 주문 트리거 확인
+        if let Event::Bar(b) = ev {
+            executor.drain_stops(b.low, b.high, ts)?;
+        }
 
         let mark = event_mark_price(ev);
         executor.mark(mark)?;
@@ -174,7 +182,7 @@ async fn run_inner(
                 strategy.on_depth(d, &ctx)?
             }
         };
-        dispatch(&executor, cmds).await?;
+        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
     }
 
     close_open_position(&executor, cfg, events, &mut equity_curve).await?;
@@ -186,7 +194,7 @@ async fn run_inner(
             .context("events must not be empty after early return")?;
         let ctx = make_ctx(&executor, last)?;
         let cmds = strategy.on_finish(&ctx)?;
-        dispatch(&executor, cmds).await?;
+        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
     }
 
     Ok(BacktestResult {
@@ -300,25 +308,49 @@ fn equity_point(
     })
 }
 
-async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyCommand>) -> Result<()> {
+async fn dispatch(
+    executor: &Arc<BacktestOrderExecutor>,
+    cmds: Vec<StrategyCommand>,
+    current_sl: &mut Option<uuid::Uuid>,
+    current_tp: &mut Option<uuid::Uuid>,
+) -> Result<()> {
     for cmd in cmds {
         match cmd {
             StrategyCommand::SubmitOrder(req) => {
                 executor.submit(req).await?;
             }
-            StrategyCommand::SetStopLoss {
-                side,
-                qty,
-                stop_price,
-            } => {
-                info!(?side, %qty, %stop_price, "백테스트 SL 설정 (가격 도달 시뮬레이션 없음)");
+            StrategyCommand::SetStopLoss { side, qty, stop_price } => {
+                // 기존 SL 취소 후 새 SL 설정
+                if let Some(old_id) = current_sl.take() {
+                    executor.cancel_order_id(old_id)?;
+                }
+                let order = executor
+                    .submit(OrderRequest {
+                        order_type: OrderType::StopMarket,
+                        side,
+                        qty,
+                        stop_price: Some(stop_price),
+                        reduce_only: true,
+                        ..Default::default()
+                    })
+                    .await?;
+                *current_sl = Some(order.id);
             }
-            StrategyCommand::SetTakeProfit {
-                side,
-                qty,
-                stop_price,
-            } => {
-                info!(?side, %qty, %stop_price, "백테스트 TP 설정 (가격 도달 시뮬레이션 없음)");
+            StrategyCommand::SetTakeProfit { side, qty, stop_price } => {
+                if let Some(old_id) = current_tp.take() {
+                    executor.cancel_order_id(old_id)?;
+                }
+                let order = executor
+                    .submit(OrderRequest {
+                        order_type: OrderType::StopMarket,
+                        side,
+                        qty,
+                        stop_price: Some(stop_price),
+                        reduce_only: true,
+                        ..Default::default()
+                    })
+                    .await?;
+                *current_tp = Some(order.id);
             }
         }
     }
