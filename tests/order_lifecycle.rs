@@ -89,6 +89,9 @@ impl LifecycleRepository for NoopLifecycleRepo {
     async fn increment_unresolved_retry(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> {
         Ok(())
     }
+    async fn net_pnl_since(&self, _: chrono::DateTime<Utc>) -> Result<Decimal, RepositoryError> {
+        Ok(Decimal::ZERO)
+    }
 }
 
 fn noop_lifecycle_tracker() -> Arc<PositionLifecycleTracker> {

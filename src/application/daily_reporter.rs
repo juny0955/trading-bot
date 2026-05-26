@@ -1,4 +1,5 @@
 use crate::application::notification_formatter::format_daily_summary;
+use crate::ports::outbound::lifecycle_repository::LifecycleRepository;
 use crate::ports::outbound::notification_sink::NotificationSink;
 use crate::ports::outbound::order_repository::OrderRepository;
 use chrono::{Duration, Utc};
@@ -11,24 +12,26 @@ use tracing::error;
 /// # Examples
 ///
 /// ```ignore
-/// let reporter = DailyReporter::new(repo, notifier);
+/// let reporter = DailyReporter::new(repo, lifecycle_repo, notifier);
 /// reporter.run(CancellationToken::new()).await;
 /// ```
 pub struct DailyReporter {
     repo: Arc<dyn OrderRepository>,
+    lifecycle_repo: Arc<dyn LifecycleRepository>,
     notifier: Arc<dyn NotificationSink>,
 }
 
 impl DailyReporter {
-    /// 일별 리포터를 생성한다.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let reporter = DailyReporter::new(repo.clone(), notifier.clone());
-    /// ```
-    pub fn new(repo: Arc<dyn OrderRepository>, notifier: Arc<dyn NotificationSink>) -> Self {
-        Self { repo, notifier }
+    pub fn new(
+        repo: Arc<dyn OrderRepository>,
+        lifecycle_repo: Arc<dyn LifecycleRepository>,
+        notifier: Arc<dyn NotificationSink>,
+    ) -> Self {
+        Self {
+            repo,
+            lifecycle_repo,
+            notifier,
+        }
     }
 
     /// 다음 UTC 자정까지 대기한 뒤 24시간마다 일별 요약을 전송한다.
@@ -42,10 +45,17 @@ impl DailyReporter {
 
             // 자정 도달 — 전날(지난 24시간) 체결 내역 조회
             let since = Utc::now() - Duration::hours(24);
+            let daily_pnl = match self.lifecycle_repo.net_pnl_since(since).await {
+                Ok(pnl) => Some(pnl),
+                Err(e) => {
+                    error!(error = %e, "일별 리포트 PnL 조회 실패");
+                    None
+                }
+            };
             match self.repo.fills_since(since).await {
                 Ok(fills) => {
                     self.notifier
-                        .send(format_daily_summary(&fills, since))
+                        .send(format_daily_summary(&fills, daily_pnl, since))
                         .await
                 }
                 Err(e) => error!(error = %e, "일별 리포트 체결 조회 실패"),

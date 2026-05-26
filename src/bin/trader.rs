@@ -128,8 +128,10 @@ async fn main() -> Result<()> {
         }
     };
 
-    let lifecycle_repo = Arc::new(PostgresLifecycleRepository::new(boot.pool.clone()));
-    let lifecycle_tracker = Arc::new(PositionLifecycleTracker::new(lifecycle_repo));
+    let lifecycle_repo: Arc<
+        dyn trading_bot::ports::outbound::lifecycle_repository::LifecycleRepository,
+    > = Arc::new(PostgresLifecycleRepository::new(boot.pool.clone()));
+    let lifecycle_tracker = Arc::new(PositionLifecycleTracker::new(lifecycle_repo.clone()));
 
     let decision_repo = Arc::new(PostgresDecisionRepository::new(boot.pool.clone()));
     let decision_logger = Arc::new(DecisionLogger::new(decision_repo));
@@ -210,7 +212,7 @@ async fn main() -> Result<()> {
         }),
         tokio::spawn({
             let token = token.clone();
-            let reporter = DailyReporter::new(repo.clone(), notifier);
+            let reporter = DailyReporter::new(repo.clone(), lifecycle_repo.clone(), notifier);
             async move { reporter.run(token).await }
         }),
     ];

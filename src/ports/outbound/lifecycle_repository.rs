@@ -1,6 +1,7 @@
 use crate::domain::lifecycle::{LifecycleSide, PositionLifecycle, UnresolvedFill};
 use crate::ports::order_repository::RepositoryError;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use uuid::Uuid;
@@ -67,4 +68,7 @@ pub trait LifecycleRepository: Send + Sync {
         id: Uuid,
         error: &str,
     ) -> Result<(), RepositoryError>;
+
+    /// `since` 이후 청산된 포지션의 net_pnl 합계를 반환한다. 일별 리포트용.
+    async fn net_pnl_since(&self, since: DateTime<Utc>) -> Result<Decimal, RepositoryError>;
 }

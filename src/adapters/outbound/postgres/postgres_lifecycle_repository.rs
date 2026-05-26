@@ -307,4 +307,18 @@ impl LifecycleRepository for PostgresLifecycleRepository {
         .await?;
         Ok(())
     }
+
+    async fn net_pnl_since(&self, since: DateTime<Utc>) -> Result<Decimal, RepositoryError> {
+        let row: (Decimal,) = sqlx::query_as(
+            r#"
+            SELECT COALESCE(SUM(net_pnl), 0)
+            FROM position_lifecycles
+            WHERE closed_at >= $1 AND net_pnl IS NOT NULL
+            "#,
+        )
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
 }

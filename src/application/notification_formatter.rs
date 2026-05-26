@@ -133,10 +133,14 @@ pub fn format_order_status(order: &Order) -> String {
 /// # Examples
 ///
 /// ```ignore
-/// let msg = format_daily_summary(&fills, Utc::now());
+/// let msg = format_daily_summary(&fills, None, Utc::now());
 /// assert!(msg.starts_with("📊"));
 /// ```
-pub fn format_daily_summary(fills: &[Fill], date: DateTime<Utc>) -> String {
+pub fn format_daily_summary(
+    fills: &[Fill],
+    daily_pnl: Option<Decimal>,
+    date: DateTime<Utc>,
+) -> String {
     let date_label = date.format("%Y-%m-%d");
     if fills.is_empty() {
         return format!("📊 일일 리포트 {date_label} — 체결 없음");
@@ -146,9 +150,13 @@ pub fn format_daily_summary(fills: &[Fill], date: DateTime<Utc>) -> String {
     let count = fills.len();
     let sell_count = count - buy_count;
 
-    format!(
+    let mut msg = format!(
         "📊 일일 리포트 {date_label}\n거래: {count}건 (매수 {buy_count} / 매도 {sell_count})\n거래량: {total_volume:.2} USDT\n수수료: {total_fee:.4} USDT",
-    )
+    );
+    if let Some(pnl) = daily_pnl {
+        msg.push_str(&format!("\n수익금: {} USDT", format_pnl(pnl)));
+    }
+    msg
 }
 
 // 체결 목록을 단일 패스로 집계한다: (매수 건수, 총 거래대금, 총 수수료)
@@ -274,7 +282,7 @@ mod tests {
     #[test]
     fn format_daily_summary_empty_returns_no_fills_label() -> Result<()> {
         let date = Utc.with_ymd_and_hms(2025, 5, 24, 0, 0, 0).unwrap();
-        let msg = format_daily_summary(&[], date);
+        let msg = format_daily_summary(&[], None, date);
         assert!(msg.contains("체결 없음"));
         Ok(())
     }
@@ -286,11 +294,24 @@ mod tests {
             make_fill(OrderSide::Buy, dec!(1), dec!(100), dec!(0.1)),
             make_fill(OrderSide::Sell, dec!(1), dec!(110), dec!(0.1)),
         ];
-        let msg = format_daily_summary(&fills, date);
+        let msg = format_daily_summary(&fills, None, date);
         // 2건, 매수 1 / 매도 1 확인
         assert!(msg.contains("2건"));
         assert!(msg.contains("매수 1"));
         assert!(msg.contains("매도 1"));
+        Ok(())
+    }
+
+    #[test]
+    fn format_daily_summary_shows_pnl() -> Result<()> {
+        let date = Utc.with_ymd_and_hms(2025, 5, 24, 0, 0, 0).unwrap();
+        let fills = vec![
+            make_fill(OrderSide::Buy, dec!(1), dec!(100), dec!(0.1)),
+            make_fill(OrderSide::Sell, dec!(1), dec!(110), dec!(0.1)),
+        ];
+        let msg = format_daily_summary(&fills, Some(dec!(150)), date);
+        assert!(msg.contains("수익금"));
+        assert!(msg.contains("+150.00"));
         Ok(())
     }
 
