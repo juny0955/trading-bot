@@ -13,7 +13,9 @@ use trading_bot::adapters::outbound::binance::account_client::BinanceAccountClie
 use trading_bot::adapters::outbound::binance::exchange_info_client::BinanceExchangeInfoClient;
 use trading_bot::adapters::outbound::binance::order::executor::BinanceOrderExecutor;
 use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
+use trading_bot::adapters::outbound::postgres::postgres_lifecycle_repository::PostgresLifecycleRepository;
 use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
+use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use trading_bot::adapters::outbound::telegram::notifier::TelegramNotifier;
 use trading_bot::application::account_bootstrap;
 use trading_bot::application::account_event_handler::AccountEventHandler;
@@ -122,11 +124,15 @@ async fn main() -> Result<()> {
         }
     };
 
+    let lifecycle_repo = Arc::new(PostgresLifecycleRepository::new(boot.pool.clone()));
+    let lifecycle_tracker = Arc::new(PositionLifecycleTracker::new(lifecycle_repo));
+
     let handler = Arc::new(AccountEventHandler::new(
         repo.clone(),
         boot.position_repo.clone(),
         fill_sink,
         notifier.clone(),
+        lifecycle_tracker,
     ));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
     let order_loop = OrderWsLoop::new(api);

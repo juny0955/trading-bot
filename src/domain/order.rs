@@ -214,6 +214,7 @@ pub struct Order {
 ///     fee_asset: "USDT".into(),
 ///     filled_at: Utc::now(),
 ///     exchange_trade_id: 42,
+///     position_lifecycle_id: None,
 /// };
 /// assert_eq!(fill.qty, dec!(1));
 /// ```
@@ -230,6 +231,8 @@ pub struct Fill {
     pub filled_at: DateTime<Utc>,
     /// Binance trade ID (`t` field). -1 이면 non-TRADE 이벤트.
     pub exchange_trade_id: i64,
+    /// ML 데이터 귀속용. Some이면 fills 테이블 기록 완료, None이면 unresolved_fills 격리.
+    pub position_lifecycle_id: Option<Uuid>,
 }
 
 /// 새 주문을 만들기 위한 요청 값입니다.

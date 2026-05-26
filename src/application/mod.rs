@@ -1,5 +1,6 @@
 pub mod account_bootstrap;
 pub mod account_event_handler;
+pub mod position_lifecycle_tracker;
 pub mod account_state;
 pub mod account_state_refresher;
 pub mod backtest;

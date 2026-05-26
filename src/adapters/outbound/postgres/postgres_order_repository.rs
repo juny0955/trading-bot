@@ -69,6 +69,7 @@ struct DbFill {
     fee_asset: String,
     filled_at: DateTime<Utc>,
     exchange_trade_id: Option<i64>,
+    position_lifecycle_id: Option<Uuid>,
 }
 
 impl From<DbFill> for Fill {
@@ -84,6 +85,7 @@ impl From<DbFill> for Fill {
             fee_asset: db.fee_asset,
             filled_at: db.filled_at,
             exchange_trade_id: db.exchange_trade_id.unwrap_or(-1),
+            position_lifecycle_id: db.position_lifecycle_id,
         }
     }
 }
@@ -209,7 +211,7 @@ impl OrderRepository for PostgresOrderRepository {
         Ok(sqlx::query_as::<_, DbFill>(
             r#"
             SELECT order_id, strategy_instance_id, symbol, side,
-                   qty, price, fee, fee_asset, filled_at, exchange_trade_id
+                   qty, price, fee, fee_asset, filled_at, exchange_trade_id, position_lifecycle_id
             FROM fills
             WHERE filled_at >= $1
             ORDER BY filled_at
@@ -285,11 +287,11 @@ impl PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO fills (
-                order_id, strategy_instance_id, symbol, side, qty, price, fee, fee_asset, filled_at, exchange_trade_id
+                order_id, strategy_instance_id, symbol, side, qty, price,
+                fee, fee_asset, filled_at, exchange_trade_id, position_lifecycle_id
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            ON CONFLICT (order_id, exchange_trade_id)
-            WHERE exchange_trade_id IS NOT NULL DO NOTHING
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            ON CONFLICT DO NOTHING
             "#,
         )
         .bind(fill.order_id)
@@ -302,6 +304,7 @@ impl PostgresOrderRepository {
         .bind(&fill.fee_asset)
         .bind(fill.filled_at)
         .bind(if fill.exchange_trade_id >= 0 { Some(fill.exchange_trade_id) } else { None })
+        .bind(fill.position_lifecycle_id)
         .execute(&self.pool)
         .await?;
         Ok(())

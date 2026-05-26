@@ -1,5 +1,6 @@
 pub mod account_source;
 pub mod config_repository;
+pub mod lifecycle_repository;
 pub mod exchange_info_source;
 pub mod fill_sink;
 pub mod market_data_sink;

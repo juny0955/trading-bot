@@ -2,6 +2,7 @@ use crate::application::notification_formatter::{
     format_fill, format_fill_with_action, format_order_status,
 };
 use crate::application::order_execution_event::{FillData, OrderExecutionEvent};
+use crate::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use crate::domain::order::{Fill, Order, OrderStatus};
 use crate::ports::fill_sink::FillSink;
 use crate::ports::order_repository::{OrderRepository, OrphanOrder};
@@ -12,68 +13,33 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
-/// 거래소 계정 이벤트를 주문 저장소와 체결 sink에 반영합니다.
-///
-/// # Examples
-///
-/// ```ignore
-/// # use std::sync::Arc;
-/// # use trading_bot::application::account_event_handler::AccountEventHandler;
-/// # use trading_bot::ports::fill_sink::FillSink;
-/// # use trading_bot::ports::order_repository::OrderRepository;
-/// # fn example(repo: Arc<dyn OrderRepository>, fill_sink: Arc<dyn FillSink>) {
-/// let handler = AccountEventHandler::new(repo, fill_sink);
-/// # }
-/// ```
 pub struct AccountEventHandler {
     repo: Arc<dyn OrderRepository>,
     position_repo: Arc<dyn PositionRepository>,
     fill_sink: Arc<dyn FillSink>,
     notifier: Arc<dyn NotificationSink>,
+    lifecycle_tracker: Arc<PositionLifecycleTracker>,
 }
 
 impl AccountEventHandler {
-    /// 새 계정 이벤트 핸들러를 생성합니다.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// # use std::sync::Arc;
-    /// # use trading_bot::application::account_event_handler::AccountEventHandler;
-    /// # use trading_bot::ports::fill_sink::FillSink;
-    /// # use trading_bot::ports::order_repository::OrderRepository;
-    /// # fn example(repo: Arc<dyn OrderRepository>, position_repo: Arc<dyn PositionRepository>, fill_sink: Arc<dyn FillSink>, notifier: Arc<dyn NotificationSink>) {
-    /// let handler = AccountEventHandler::new(repo, position_repo, fill_sink, notifier);
-    /// # }
-    /// ```
     pub fn new(
         repo: Arc<dyn OrderRepository>,
         position_repo: Arc<dyn PositionRepository>,
         fill_sink: Arc<dyn FillSink>,
         notifier: Arc<dyn NotificationSink>,
+        lifecycle_tracker: Arc<PositionLifecycleTracker>,
     ) -> Self {
         Self {
             repo,
             position_repo,
             fill_sink,
             notifier,
+            lifecycle_tracker,
         }
     }
 
-    /// 이벤트 채널을 소비하며 주문 상태와 체결 내역을 반영합니다.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// # async fn example(handler: trading_bot::application::account_event_handler::AccountEventHandler) {
-    /// use tokio::sync::mpsc;
-    /// use tokio_util::sync::CancellationToken;
-    ///
-    /// let (_tx, rx) = mpsc::channel(16);
-    /// handler.run(rx, CancellationToken::new()).await;
-    /// # }
-    /// ```
     pub async fn run(&self, mut rx: Receiver<OrderExecutionEvent>, token: CancellationToken) {
         loop {
             tokio::select! {
@@ -119,30 +85,58 @@ impl AccountEventHandler {
     }
 
     async fn record_fill_if_present(&self, order: &Order, event: &OrderExecutionEvent) {
-        if let Some(fd) = event.fill.as_ref() {
-            let fill = fill_from_data(order, fd);
+        let Some(fd) = event.fill.as_ref() else {
+            return;
+        };
 
-            // 체결을 DB에 영구 기록한다. 실패해도 포지션 업데이트와 알림은 계속 진행한다.
+        let lifecycle_id = self.lifecycle_tracker.resolve_lifecycle(order.id).await;
+        let fill = fill_from_data(order, fd, lifecycle_id);
+
+        if lifecycle_id.is_some() {
             if let Err(e) = self.repo.record_fill(&fill).await {
                 error!(error = %e, "Fill PG 저장 실패");
             }
-            // 포지션을 업데이트하고 액션 타입으로 컨텍스트 알림을 생성한다.
-            // 포지션 업데이트 실패 시 기본 체결 포맷으로 fallback해 알림은 항상 전송한다.
-            let msg = match self
-                .position_repo
-                .apply_fill(order.strategy_instance_id, &fill)
+        } else {
+            warn!(
+                order_id = %order.id,
+                exchange_trade_id = fd.exchange_trade_id,
+                "lifecycle 매핑 실패 — unresolved_fills에 격리"
+            );
+            let trade_id = if fd.exchange_trade_id >= 0 {
+                Some(fd.exchange_trade_id)
+            } else {
+                None
+            };
+            if let Err(e) = self
+                .lifecycle_tracker
+                .quarantine_fill(trade_id, event.raw_event.clone(), "no lifecycle mapping")
                 .await
             {
-                Ok((_, action)) => format_fill_with_action(&fill, &action),
-                Err(e) => {
-                    error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
-                    format_fill(&fill)
-                }
-            };
-            self.fill_sink.emit(fill.clone()).await;
-            self.notifier.send(msg).await;
-            info!(symbol = %order.symbol, side = ?fd.side, qty = %fd.qty, price = %fd.price, "Fill 수신");
+                error!(error = %e, "unresolved_fill 저장 실패");
+            }
         }
+
+        let msg = match self
+            .position_repo
+            .apply_fill(order.strategy_instance_id, &fill)
+            .await
+        {
+            Ok((_, action)) => format_fill_with_action(&fill, &action),
+            Err(e) => {
+                error!(error = %e, symbol = %order.symbol, "포지션 업데이트 실패");
+                format_fill(&fill)
+            }
+        };
+        self.fill_sink.emit(fill.clone()).await;
+        self.notifier.send(msg).await;
+        info!(
+            symbol = %order.symbol,
+            side = ?fd.side,
+            qty = %fd.qty,
+            price = %fd.price,
+            lifecycle_id = ?lifecycle_id,
+            "Fill 수신"
+        );
     }
 
     async fn update_status_if_present(&self, order: Order, event: &OrderExecutionEvent) {
@@ -157,8 +151,6 @@ impl AccountEventHandler {
                         filled_qty = %updated.filled_qty,
                         "주문 상태 갱신"
                     );
-                    // 체결이 없는 종료 상태(취소·거부·만료)만 별도 알림을 전송한다.
-                    // Filled 상태는 record_fill_if_present에서 이미 알림을 전송했다.
                     if matches!(
                         status,
                         OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
@@ -172,7 +164,7 @@ impl AccountEventHandler {
     }
 }
 
-fn fill_from_data(order: &Order, fd: &FillData) -> Fill {
+fn fill_from_data(order: &Order, fd: &FillData, position_lifecycle_id: Option<Uuid>) -> Fill {
     Fill {
         order_id: order.id,
         strategy_instance_id: order.strategy_instance_id,
@@ -184,6 +176,7 @@ fn fill_from_data(order: &Order, fd: &FillData) -> Fill {
         fee_asset: fd.fee_asset.clone(),
         filled_at: fd.filled_at,
         exchange_trade_id: fd.exchange_trade_id,
+        position_lifecycle_id,
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::domain::lifecycle::LifecycleSide;
 use crate::domain::order::{OrderSide, OrderStatus, OrderType, TimeInForce};
 use crate::ports::order_repository::RepositoryError;
 use sqlx::Postgres;
@@ -108,6 +109,35 @@ impl sqlx::Encode<'_, Postgres> for OrderStatus {
             Self::Cancelled => "cancelled",
             Self::Rejected => "rejected",
             Self::Expired => "expired",
+        };
+        <&str as sqlx::Encode<Postgres>>::encode_by_ref(&s, buf)
+    }
+}
+
+// ── LifecycleSide ────────────────────────────────────────────────────────────
+
+impl sqlx::Type<Postgres> for LifecycleSide {
+    fn type_info() -> PgTypeInfo {
+        <str as sqlx::Type<Postgres>>::type_info()
+    }
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        <str as sqlx::Type<Postgres>>::compatible(ty)
+    }
+}
+impl<'r> sqlx::Decode<'r, Postgres> for LifecycleSide {
+    fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        match <&str as sqlx::Decode<Postgres>>::decode(value)? {
+            "long" => Ok(Self::Long),
+            "short" => Ok(Self::Short),
+            other => Err(format!("unknown LifecycleSide: {other}").into()),
+        }
+    }
+}
+impl sqlx::Encode<'_, Postgres> for LifecycleSide {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let s = match self {
+            Self::Long => "long",
+            Self::Short => "short",
         };
         <&str as sqlx::Encode<Postgres>>::encode_by_ref(&s, buf)
     }
