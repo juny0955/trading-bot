@@ -136,6 +136,7 @@ async fn main() -> Result<()> {
         order_svc.clone(),
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
+        boot.account_state.clone(),
     ));
     let reconciler = OrderReconciler::new(
         order_svc,

@@ -1,4 +1,5 @@
 use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
+use crate::application::account_state::AccountState;
 use crate::domain::backtest::{Bar, DepthSnapshot};
 use crate::domain::event::MarketDataEvent;
 use crate::domain::market_data::{Depth, Kline};
@@ -36,31 +37,21 @@ pub struct LiveTrader {
     order_svc: Arc<dyn OrderService>,
     position_repo: Arc<dyn PositionRepository>,
     book_ticker_cache: Arc<BookTickerCache>,
+    account_state: Arc<AccountState>,
 }
 
 impl LiveTrader {
-    /// 새 실시간 트레이더 유스케이스를 생성합니다.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// # use std::sync::Arc;
-    /// # use trading_bot::application::live_trader::LiveTrader;
-    /// # use trading_bot::ports::order_service::OrderService;
-    /// # use trading_bot::ports::position_repository::PositionRepository;
-    /// # fn example(order_svc: Arc<dyn OrderService>, position_repo: Arc<dyn PositionRepository>) {
-    /// let trader = LiveTrader::new(order_svc, position_repo);
-    /// # }
-    /// ```
     pub fn new(
         order_svc: Arc<dyn OrderService>,
         position_repo: Arc<dyn PositionRepository>,
         book_ticker_cache: Arc<BookTickerCache>,
+        account_state: Arc<AccountState>,
     ) -> Self {
         Self {
             order_svc,
             position_repo,
             book_ticker_cache,
+            account_state,
         }
     }
 }
@@ -75,7 +66,18 @@ impl TradingUseCase for LiveTrader {
     ) -> Result<()> {
         let (market_tx, mut market_rx) = mpsc::channel::<MarketDataEvent>(256);
         spawn_market_feed(feed, market_tx, token.clone());
-        start_strategies(&self.position_repo, &self.order_svc, &mut strategies).await?;
+
+        let equity = self.account_state.available_balance();
+        start_strategies(
+            &self.position_repo,
+            &self.order_svc,
+            &mut strategies,
+            equity,
+            None,
+        )
+        .await?;
+
+        let mut fear_greed: Option<u8> = None;
 
         loop {
             tokio::select! {
@@ -85,7 +87,11 @@ impl TradingUseCase for LiveTrader {
                         if let MarketDataEvent::BookTicker(ref bt) = e {
                             self.book_ticker_cache.update(bt.clone());
                         }
-                        process_market_event(&self.position_repo, &self.order_svc, &mut strategies, &e).await?;
+                        if let MarketDataEvent::FearGreed(ref fg) = e {
+                            fear_greed = fg.value.parse::<u8>().ok();
+                        }
+                        let equity = self.account_state.available_balance();
+                        process_market_event(&self.position_repo, &self.order_svc, &mut strategies, &e, equity, fear_greed).await?;
                     }
                     None => {
                         error!("market feed 채널 닫힘");
@@ -95,7 +101,15 @@ impl TradingUseCase for LiveTrader {
             }
         }
 
-        finish_strategies(&self.position_repo, &self.order_svc, &mut strategies).await?;
+        let equity = self.account_state.available_balance();
+        finish_strategies(
+            &self.position_repo,
+            &self.order_svc,
+            &mut strategies,
+            equity,
+            fear_greed,
+        )
+        .await?;
         Ok(())
     }
 }
@@ -114,9 +128,19 @@ async fn start_strategies(
     position_repo: &Arc<dyn PositionRepository>,
     order_svc: &Arc<dyn OrderService>,
     strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
+    equity: Decimal,
+    fear_greed: Option<u8>,
 ) -> Result<()> {
     for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
-        let ctx = make_ctx(position_repo, instance_id, symbol, now_ns()).await;
+        let ctx = make_ctx(
+            position_repo,
+            instance_id,
+            symbol,
+            now_ns(),
+            equity,
+            fear_greed,
+        )
+        .await;
         let cmds = strategy.on_start(&ctx)?;
         dispatch(order_svc, instance_id, symbol, cmds).await;
     }
@@ -128,13 +152,23 @@ async fn process_market_event(
     order_svc: &Arc<dyn OrderService>,
     strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
     event: &MarketDataEvent,
+    equity: Decimal,
+    fear_greed: Option<u8>,
 ) -> Result<()> {
     let symbol = event_symbol(event);
     for (&(instance_id, ref entry_symbol), strategy) in strategies.iter_mut() {
         if entry_symbol != &symbol {
             continue;
         }
-        let ctx = make_ctx(position_repo, instance_id, entry_symbol, now_ns()).await;
+        let ctx = make_ctx(
+            position_repo,
+            instance_id,
+            entry_symbol,
+            now_ns(),
+            equity,
+            fear_greed,
+        )
+        .await;
         let cmds = on_event(&mut **strategy, event, &ctx)?;
         dispatch(order_svc, instance_id, entry_symbol, cmds).await;
     }
@@ -145,9 +179,19 @@ async fn finish_strategies(
     position_repo: &Arc<dyn PositionRepository>,
     order_svc: &Arc<dyn OrderService>,
     strategies: &mut HashMap<(i64, String), Box<dyn Strategy>>,
+    equity: Decimal,
+    fear_greed: Option<u8>,
 ) -> Result<()> {
     for (&(instance_id, ref symbol), strategy) in strategies.iter_mut() {
-        let ctx = make_ctx(position_repo, instance_id, symbol, now_ns()).await;
+        let ctx = make_ctx(
+            position_repo,
+            instance_id,
+            symbol,
+            now_ns(),
+            equity,
+            fear_greed,
+        )
+        .await;
         let cmds = strategy.on_finish(&ctx)?;
         info!(cmds = cmds.len(), "전략 on_finish");
         dispatch(order_svc, instance_id, symbol, cmds).await;
@@ -257,6 +301,8 @@ async fn make_ctx(
     instance_id: i64,
     symbol: &str,
     now_ns: i64,
+    equity: Decimal,
+    fear_greed: Option<u8>,
 ) -> Context {
     let position = match repo.get(instance_id, symbol).await {
         Ok(Some(sp)) => sp.position,
@@ -269,8 +315,9 @@ async fn make_ctx(
 
     Context {
         now_ns,
-        equity: Decimal::ZERO,
+        equity,
         position,
+        fear_greed,
     }
 }
 

@@ -3,6 +3,7 @@ use crate::domain::order::{OrderRequest, OrderSide, OrderType};
 use crate::domain::position::Position;
 use crate::domain::strategies::ema_cross::EmaCross;
 use crate::domain::strategies::macd_cross::MacdCross;
+use crate::domain::strategies::market_filter::{FilterConfig, MarketFilter};
 use crate::domain::strategies::rsi_bounce::RsiBounce;
 use anyhow::Result;
 use rust_decimal::Decimal;
@@ -10,6 +11,7 @@ use serde_json::Value;
 
 pub mod ema_cross;
 pub mod macd_cross;
+pub mod market_filter;
 pub mod rsi_bounce;
 
 /// 전략 실행 시점의 계좌/시장 컨텍스트입니다.
@@ -25,6 +27,7 @@ pub mod rsi_bounce;
 ///     now_ns: 1_000,
 ///     equity: dec!(10000),
 ///     position: Position::default(),
+///     fear_greed: None,
 /// };
 /// assert_eq!(ctx.now_ns, 1_000);
 /// ```
@@ -32,6 +35,8 @@ pub struct Context {
     pub now_ns: i64,
     pub equity: Decimal,
     pub position: Position,
+    /// Alternative.me Fear & Greed Index (0–100). None이면 필터 비활성.
+    pub fear_greed: Option<u8>,
 }
 
 /// 전략이 실행 계층에 요청하는 명령입니다.
@@ -202,6 +207,14 @@ pub fn create_strategy(name: &str, params: &Value) -> Result<Box<dyn Strategy>> 
         "ema_cross" => Ok(Box::new(EmaCross::from_params(params)?)),
         "rsi_bounce" => Ok(Box::new(RsiBounce::from_params(params)?)),
         "macd_cross" => Ok(Box::new(MacdCross::from_params(params)?)),
+        "market_filter" => {
+            let inner_type = params["inner"]["type"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("market_filter.inner.type 필드가 필요합니다"))?;
+            let inner = create_strategy(inner_type, &params["inner"]["params"])?;
+            let config = FilterConfig::from_params(params)?;
+            Ok(Box::new(MarketFilter::new(inner, config)))
+        }
         other => anyhow::bail!("알 수 없는 전략: {other}"),
     }
 }

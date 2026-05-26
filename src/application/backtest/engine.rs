@@ -282,6 +282,7 @@ fn make_ctx(executor: &Arc<BacktestOrderExecutor>, ts_ns: i64) -> Result<Context
         now_ns: ts_ns,
         equity,
         position,
+        fear_greed: None,
     })
 }
 
@@ -305,8 +306,20 @@ async fn dispatch(executor: &Arc<BacktestOrderExecutor>, cmds: Vec<StrategyComma
             StrategyCommand::SubmitOrder(req) => {
                 executor.submit(req).await?;
             }
-            // 백테스트에서는 stop-loss/take-profit 주문을 시뮬레이션하지 않는다.
-            StrategyCommand::SetStopLoss { .. } | StrategyCommand::SetTakeProfit { .. } => {}
+            StrategyCommand::SetStopLoss {
+                side,
+                qty,
+                stop_price,
+            } => {
+                info!(?side, %qty, %stop_price, "백테스트 SL 설정 (가격 도달 시뮬레이션 없음)");
+            }
+            StrategyCommand::SetTakeProfit {
+                side,
+                qty,
+                stop_price,
+            } => {
+                info!(?side, %qty, %stop_price, "백테스트 TP 설정 (가격 도달 시뮬레이션 없음)");
+            }
         }
     }
     Ok(())
