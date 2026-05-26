@@ -64,6 +64,14 @@ async fn main() -> Result<()> {
     let secret = std::env::var("BINANCE_SECRET").context("BINANCE_SECRET 없음")?;
     let (api, ws_rx) = BinanceOrderApi::new(api_key, secret, &boot.binance_cfg)?;
 
+    // resolve_pending_submits가 WS를 사용하므로 bootstrap 전에 Order WS 루프를 먼저 기동한다.
+    let token = CancellationToken::new();
+    let order_ws_handle = {
+        let order_loop = OrderWsLoop::new(api.clone());
+        let token = token.clone();
+        tokio::spawn(async move { order_loop.run_order_stream(ws_rx, token).await })
+    };
+
     let exchange_info_client = Arc::new(BinanceExchangeInfoClient::new(api.clone()));
     let account_client = Arc::new(BinanceAccountClient::new(api.clone()));
     let repo: Arc<dyn OrderRepository> = Arc::new(PostgresOrderRepository::new(boot.pool.clone()));
@@ -146,8 +154,6 @@ async fn main() -> Result<()> {
         lifecycle_tracker.clone(),
     ));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
-    let order_loop = OrderWsLoop::new(api);
-    let token = CancellationToken::new();
 
     let trader = Box::new(LiveTrader::new(
         order_svc.clone(),
@@ -172,10 +178,7 @@ async fn main() -> Result<()> {
     let account_refresher = AccountStateRefresher::new(account_client, boot.account_state.clone());
 
     let mut handles = vec![
-        tokio::spawn({
-            let token = token.clone();
-            async move { order_loop.run_order_stream(ws_rx, token).await }
-        }),
+        order_ws_handle,
         tokio::spawn({
             let token = token.clone();
             let account_state = boot.account_state.clone();
