@@ -4,7 +4,6 @@ use crate::ports::outbound::decision_repository::DecisionRepository;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 

@@ -19,6 +19,8 @@ pub struct PositionLifecycleTracker {
     repo: Arc<dyn LifecycleRepository>,
     /// order_id → lifecycle_id (fill 귀속 정확도 보장)
     map: RwLock<HashMap<Uuid, Uuid>>,
+    /// (strategy_instance_id, symbol) → lifecycle_id (현재 활성 포지션 조회용)
+    active: RwLock<HashMap<(i64, String), Uuid>>,
 }
 
 impl PositionLifecycleTracker {
@@ -26,6 +28,7 @@ impl PositionLifecycleTracker {
         Self {
             repo,
             map: RwLock::new(HashMap::new()),
+            active: RwLock::new(HashMap::new()),
         }
     }
 
@@ -85,6 +88,23 @@ impl PositionLifecycleTracker {
         low: Option<Decimal>,
     ) -> Result<(), RepositoryError> {
         self.repo.update_water_marks(id, high, low).await
+    }
+
+    /// (strategy_instance_id, symbol)에 활성 lifecycle을 등록합니다.
+    /// open_lifecycle() 성공 후 LiveTrader에서 호출합니다.
+    pub async fn set_active_lifecycle(&self, instance_id: i64, symbol: &str, lifecycle_id: Uuid) {
+        self.active.write().await.insert((instance_id, symbol.to_string()), lifecycle_id);
+    }
+
+    /// (strategy_instance_id, symbol)의 현재 활성 lifecycle_id를 조회합니다.
+    /// ManagementCommand 실행 시 fill 귀속에 사용합니다.
+    pub async fn get_active_lifecycle(&self, instance_id: i64, symbol: &str) -> Option<Uuid> {
+        self.active.read().await.get(&(instance_id, symbol.to_string())).copied()
+    }
+
+    /// 포지션 종료 시 활성 lifecycle 매핑을 제거합니다.
+    pub async fn clear_active_lifecycle(&self, instance_id: i64, symbol: &str) {
+        self.active.write().await.remove(&(instance_id, symbol.to_string()));
     }
 
     pub fn repo(&self) -> &Arc<dyn LifecycleRepository> {

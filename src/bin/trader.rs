@@ -13,9 +13,12 @@ use trading_bot::adapters::outbound::binance::account_client::BinanceAccountClie
 use trading_bot::adapters::outbound::binance::exchange_info_client::BinanceExchangeInfoClient;
 use trading_bot::adapters::outbound::binance::order::executor::BinanceOrderExecutor;
 use trading_bot::adapters::outbound::binance::order::order_stream::OrderWsLoop;
+use trading_bot::adapters::outbound::postgres::postgres_decision_repository::PostgresDecisionRepository;
 use trading_bot::adapters::outbound::postgres::postgres_lifecycle_repository::PostgresLifecycleRepository;
 use trading_bot::adapters::outbound::postgres::postgres_order_repository::PostgresOrderRepository;
+use trading_bot::application::decision_logger::DecisionLogger;
 use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
+use trading_bot::application::trade_manager::{TradeManager, TradeManagerParams};
 use trading_bot::adapters::outbound::telegram::notifier::TelegramNotifier;
 use trading_bot::application::account_bootstrap;
 use trading_bot::application::account_event_handler::AccountEventHandler;
@@ -127,12 +130,16 @@ async fn main() -> Result<()> {
     let lifecycle_repo = Arc::new(PostgresLifecycleRepository::new(boot.pool.clone()));
     let lifecycle_tracker = Arc::new(PositionLifecycleTracker::new(lifecycle_repo));
 
+    let decision_repo = Arc::new(PostgresDecisionRepository::new(boot.pool.clone()));
+    let decision_logger = Arc::new(DecisionLogger::new(decision_repo));
+    let trade_manager = Arc::new(TradeManager::new());
+
     let handler = Arc::new(AccountEventHandler::new(
         repo.clone(),
         boot.position_repo.clone(),
         fill_sink,
         notifier.clone(),
-        lifecycle_tracker,
+        lifecycle_tracker.clone(),
     ));
     let user_stream = BinanceUserStreamHandler::new(api.clone());
     let order_loop = OrderWsLoop::new(api);
@@ -143,6 +150,10 @@ async fn main() -> Result<()> {
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
         boot.account_state.clone(),
+        trade_manager,
+        lifecycle_tracker,
+        decision_logger,
+        TradeManagerParams::default(),
     ));
     let reconciler = OrderReconciler::new(
         order_svc,

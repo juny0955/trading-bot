@@ -57,6 +57,8 @@ pub struct TradeManager {
     states: RwLock<HashMap<PositionKey, PositionRuntimeState>>,
     /// 포지션별 트리거 상태 (last_price, last_eval_time)
     triggers: RwLock<HashMap<PositionKey, TriggerState>>,
+    /// 포지션별 entry ATR 캐시 (lifecycle open 시 저장, snapshot 빌드에 사용)
+    entry_atrs: RwLock<HashMap<PositionKey, Decimal>>,
 }
 
 impl TradeManager {
@@ -64,20 +66,39 @@ impl TradeManager {
         Self {
             states: RwLock::new(HashMap::new()),
             triggers: RwLock::new(HashMap::new()),
+            entry_atrs: RwLock::new(HashMap::new()),
         }
     }
 
     // ── 상태 관리 ─────────────────────────────────────────────────────────────
 
     /// 새 포지션 오픈 시 runtime state를 초기화합니다.
-    pub async fn init_position(&self, key: PositionKey, state: PositionRuntimeState) {
-        self.states.write().await.insert(key, state);
+    pub async fn init_position(
+        &self,
+        key: PositionKey,
+        state: PositionRuntimeState,
+        entry_atr: Option<Decimal>,
+    ) {
+        self.states.write().await.insert(key.clone(), state);
+        if let Some(atr) = entry_atr {
+            self.entry_atrs.write().await.insert(key, atr);
+        }
     }
 
     /// 포지션 종료 시 runtime state를 제거합니다.
     pub async fn remove_position(&self, key: &PositionKey) {
         self.states.write().await.remove(key);
         self.triggers.write().await.remove(key);
+        self.entry_atrs.write().await.remove(key);
+    }
+
+    /// lifecycle open 후 entry_atr을 설정합니다 (전략 ATR이 확정되면 호출).
+    pub async fn set_entry_atr(&self, key: &PositionKey, atr: Decimal) {
+        self.entry_atrs.write().await.insert(key.clone(), atr);
+    }
+
+    pub async fn get_entry_atr(&self, key: &PositionKey) -> Option<Decimal> {
+        self.entry_atrs.read().await.get(key).copied()
     }
 
     /// PartialClose 주문 제출 후 pending_reduce_order_id를 설정합니다.
