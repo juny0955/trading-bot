@@ -39,6 +39,7 @@ impl From<BinanceApiError> for OrderError {
                 code: -2010 | -2018 | -2019,
                 ..
             } => Self::InsufficientMargin,
+            BinanceApiError::Rejected { code: -2013, msg } => Self::NotFound(msg),
             BinanceApiError::Rejected { code, msg } => Self::ExchangeRejected { code, msg },
             BinanceApiError::Timeout => Self::Timeout,
             BinanceApiError::Connection(s) => Self::ConnectionLost(s),
