@@ -63,41 +63,48 @@ flowchart TD
 
 ## 3. 실시간 트레이딩 흐름 (Trader Flow)
 
-실제 시장에서 전략에 따라 주문을 실행하고, 체결 결과를 반영하는 실시간 트레이딩 과정입니다.
+실제 시장에서 전략에 따라 주문을 실행하고, 리스크 검증 및 상태 동기화가 이루어지는 과정입니다.
 
 ### 단계별 흐름
 1. **Market Feed**: `BinanceMarketProvider`를 통해 실시간 `MarketDataEvent`를 수신합니다.
-2. **Strategy Analysis**: `LiveTrader` 서비스가 현재 전략(`Strategy`)에 시장 데이터를 전달하여 매매 신호를 판단합니다.
-3. **Order Submission**: 신호가 발생하면 `OrderService`를 통해 주문을 생성하고, `BinanceOrderExecutor`가 거래소 API로 주문을 제출합니다.
-4. **Execution Event**: 거래소에서 체결이 발생하면 `BinanceUserStreamHandler`가 WebSocket을 통해 `OrderExecutionEvent`를 수신합니다.
-5. **State Update**: `AccountEventHandler`가 이벤트를 처리하여 `PostgresOrderRepository`에 주문 상태를 갱신하고 체결(Fill) 내역을 기록합니다.
-6. **Feedback Loop**: 갱신된 포트폴리오 상태는 다음 전략 판단 시 참고 데이터로 활용됩니다.
+2. **Strategy Analysis**: `LiveTrader`가 시장 데이터를 전략에 전달하여 매매 신호를 판단합니다.
+3. **Pre-trade Risk Check**: 신호 발생 시 `RiskController`가 계좌 잔고, 포지션 한도, 거래소 필터를 검증합니다. 한도 초과 시 수량을 자동 조정합니다.
+4. **Order Submission (Outbox)**: `OutboxOrderService`가 주문을 DB에 `PendingSubmit` 상태로 먼저 기록한 후, `BinanceOrderExecutor`를 통해 거래소에 제출합니다.
+5. **Execution Event**: 거래소 체결 시 `BinanceUserStreamHandler`가 이벤트를 수신하여 `AccountEventHandler`에 전달합니다.
+6. **Background Sync**: 
+    - `OrderReconciler`가 주기적으로 미체결 주문과 로컬 DB 간의 차이를 동기화합니다.
+    - `AccountStateRefresher`와 `ExchangeInfoRefresher`가 잔고 및 시장 규칙을 주기적으로 갱신합니다.
 
 ### 시각화 (Sequence Diagram)
 ```mermaid
 sequenceDiagram
-    participant BWS as Binance Market WS
-    participant LF as BinanceMarketProvider (In)
+    participant MWS as Binance Market WS
     participant T as LiveTrader (App)
-    participant S as Strategy (Domain)
-    participant OE as BinanceOrderExecutor (Out)
+    participant RC as RiskController (App)
+    participant OS as OutboxOrderService (App)
+    participant BE as BinanceExecutor (Out)
     participant UWS as Binance User WS
-    participant UH as BinanceUserStreamHandler (In)
-    participant AH as AccountEventHandler (App)
+    participant AEH as AccountEventHandler (App)
+    participant OR as OrderReconciler (App)
     participant DB as Postgres (Order Repo)
 
-    BWS->>LF: Market Data
-    LF->>T: MarketDataEvent
-    T->>S: on_event()
+    MWS->>T: MarketDataEvent
+    T->>T: Strategy Signal
     alt Signal Generated
-        S->>T: OrderRequest
-        T->>OE: Execute Order
-        OE->>BWS: API Request
+        T->>RC: check(OrderRequest)
+        RC-->>T: validated/adjusted Request
+        T->>OS: submit(Request)
+        OS->>DB: persist (PendingSubmit)
+        OS->>BE: execute()
+        BE-->>OS: exchange_order_id
+        OS->>DB: update (New)
     end
-    UWS->>UH: Execution Update (JSON)
-    UH->>AH: OrderExecutionEvent
-    AH->>DB: Upsert Order & Record Fill
-    DB-->>AH: OK
+    UWS->>AEH: OrderExecutionEvent
+    AEH->>DB: update Status & record Fill
+    loop Every 60s
+        OR->>BE: query open orders
+        OR->>DB: sync status & cancel TTL exceeded
+    end
 ```
 
 ---
