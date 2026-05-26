@@ -1,5 +1,7 @@
 pub mod account_bootstrap;
 pub mod account_event_handler;
+pub mod decision_logger;
+pub mod outcome_backfiller;
 pub mod position_lifecycle_tracker;
 pub mod account_state;
 pub mod account_state_refresher;

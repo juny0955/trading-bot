@@ -1,6 +1,7 @@
 pub mod account;
 pub mod backtest;
 pub mod lifecycle;
+pub mod trade_decision;
 pub mod event;
 pub mod exchange_info;
 pub mod market_data;

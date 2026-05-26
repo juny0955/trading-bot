@@ -87,6 +87,30 @@ pub struct PositionRuntimeState {
     pub unprotected_since: Option<DateTime<Utc>>,
 }
 
+/// 결정 시점의 시장 특징 (trade_decisions ML features).
+#[derive(Debug, Clone, Default)]
+pub struct DecisionMarketContext {
+    pub atr: Option<Decimal>,
+    /// atr / mid_price × 100
+    pub atr_pct: Option<Decimal>,
+    pub adx: Option<Decimal>,
+    pub spread_pct: Option<Decimal>,
+    pub fng_value: Option<i16>,
+    /// 1(정배열) / -1(역배열) / 0(중립)
+    pub ema_alignment: Option<i16>,
+    pub ob_imbalance: Option<Decimal>,
+}
+
+/// 결정 시점의 포지션 상태 (trade_decisions ML features).
+#[derive(Debug, Clone, Default)]
+pub struct DecisionPositionContext {
+    pub unrealized_pnl_pct: Option<Decimal>,
+    pub time_in_trade_secs: Option<i32>,
+    pub dist_to_sl_atr: Option<Decimal>,
+    pub dist_to_tp_atr: Option<Decimal>,
+    pub tp_stage: Option<i16>,
+}
+
 /// lifecycle 매핑 실패 체결 격리 레코드 (unresolved_fills 테이블 대응).
 #[derive(Debug, Clone)]
 pub struct UnresolvedFill {
