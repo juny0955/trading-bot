@@ -62,6 +62,7 @@ pub enum ManagementCommand {
 #[derive(Debug, Clone)]
 pub struct PositionSnapshot {
     pub current_price: Decimal,
+    /// (current_price - entry_price) × qty × side_sign — 이미 방향 반영됨
     pub unrealized_pnl: Decimal,
     pub atr: Decimal,
     pub ema200: Decimal,
@@ -69,6 +70,8 @@ pub struct PositionSnapshot {
     pub entry_price: Decimal,
     pub entry_atr: Decimal,
     pub qty: Decimal,
+    /// Long / Short — HoldCutDecider EMA 방향 판단에 사용
+    pub is_long: bool,
 }
 
 /// 거래소/결정 가변 상태 (Arc<RwLock<PositionRuntimeState>>로 관리).
