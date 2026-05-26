@@ -231,7 +231,13 @@ impl BacktestOrderExecutor {
         ts_ns: i64,
     ) -> Result<Vec<Fill>, BacktestExecutorError> {
         let mut st_guard = self.state()?;
-        let BacktestState { portfolio, orders, stop_orders, fills_log, .. } = &mut *st_guard;
+        let BacktestState {
+            portfolio,
+            orders,
+            stop_orders,
+            fills_log,
+            ..
+        } = &mut *st_guard;
 
         if stop_orders.is_empty() {
             return Ok(Vec::new());
@@ -315,11 +321,11 @@ impl BacktestOrderExecutor {
     /// 이미 체결됐거나 없는 주문은 조용히 무시합니다.
     pub fn cancel_order_id(&self, id: Uuid) -> Result<(), BacktestExecutorError> {
         let mut st = self.state()?;
-        if let Some(o) = st.orders.get_mut(&id) {
-            if o.status == OrderStatus::New {
-                o.status = OrderStatus::Cancelled;
-                o.updated_at = Utc::now();
-            }
+        if let Some(o) = st.orders.get_mut(&id)
+            && o.status == OrderStatus::New
+        {
+            o.status = OrderStatus::Cancelled;
+            o.updated_at = Utc::now();
         }
         st.pending.retain(|oid| *oid != id);
         st.stop_orders.retain(|oid| *oid != id);
@@ -337,7 +343,10 @@ impl BacktestOrderExecutor {
 impl OrderExecutor for BacktestOrderExecutor {
     async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
         let is_stop = request.order_type == OrderType::StopMarket;
-        if !matches!(request.order_type, OrderType::Market | OrderType::StopMarket) {
+        if !matches!(
+            request.order_type,
+            OrderType::Market | OrderType::StopMarket
+        ) {
             return Err(OrderError::InvalidRequest(format!(
                 "백테스트는 Market/StopMarket만 지원: {:?}",
                 request.order_type
@@ -481,7 +490,9 @@ mod tests {
         ex.submit(req(OrderSide::Buy, dec!(1))).await?;
         ex.drain_pending(dec!(100), dec!(100), 1)?;
         // SL 설정 (95 아래로 떨어지면 청산)
-        let sl = ex.submit(stop_req(OrderSide::Sell, dec!(1), dec!(95))).await?;
+        let sl = ex
+            .submit(stop_req(OrderSide::Sell, dec!(1), dec!(95)))
+            .await?;
 
         // 저가 98 → 미트리거
         let fills = ex.drain_stops(dec!(98), dec!(102), 2)?;
@@ -500,7 +511,9 @@ mod tests {
         let ex = BacktestOrderExecutor::new(dec!(10000), dec!(0))?;
         ex.submit(req(OrderSide::Buy, dec!(1))).await?;
         ex.drain_pending(dec!(100), dec!(100), 1)?;
-        let sl = ex.submit(stop_req(OrderSide::Sell, dec!(1), dec!(95))).await?;
+        let sl = ex
+            .submit(stop_req(OrderSide::Sell, dec!(1), dec!(95)))
+            .await?;
 
         ex.cancel_order_id(sl.id)?;
 

@@ -3,7 +3,9 @@
 /// 실제 DB 없이 in-memory fake를 사용한다.
 use async_trait::async_trait;
 use chrono::Utc;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::order_execution_event::{FillData, OrderExecutionEvent};
@@ -19,26 +21,74 @@ use trading_bot::ports::outbound::order_repository::{
     OrderRepository, OrphanOrder, RepositoryError,
 };
 use trading_bot::ports::outbound::position_repository::PositionRepository;
-use rust_decimal::Decimal;
-use serde_json::Value;
 use uuid::Uuid;
 
 struct NoopLifecycleRepo;
 
 #[async_trait]
 impl LifecycleRepository for NoopLifecycleRepo {
-    async fn open(&self, _: i64, _: &str, _: LifecycleSide, _: Option<Decimal>) -> Result<Uuid, RepositoryError> {
+    async fn open(
+        &self,
+        _: i64,
+        _: &str,
+        _: LifecycleSide,
+        _: Option<Decimal>,
+    ) -> Result<Uuid, RepositoryError> {
         Ok(Uuid::nil())
     }
-    async fn close(&self, _: Uuid) -> Result<(), RepositoryError> { Ok(()) }
-    async fn find_open(&self, _: i64, _: &str) -> Result<Option<PositionLifecycle>, RepositoryError> { Ok(None) }
-    async fn update_water_marks(&self, _: Uuid, _: Option<Decimal>, _: Option<Decimal>) -> Result<(), RepositoryError> { Ok(()) }
-    async fn backfill_close(&self, _: Uuid, _: Decimal, _: Decimal, _: Decimal, _: Decimal, _: Option<Decimal>, _: Option<Decimal>) -> Result<(), RepositoryError> { Ok(()) }
-    async fn save_unresolved(&self, _: Option<i64>, _: Value, _: &str) -> Result<(), RepositoryError> { Ok(()) }
-    async fn find_unresolved_pending(&self, _: i64) -> Result<Vec<UnresolvedFill>, RepositoryError> { Ok(vec![]) }
-    async fn mark_unresolved_resolved(&self, _: Uuid) -> Result<(), RepositoryError> { Ok(()) }
-    async fn mark_unresolved_dead(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> { Ok(()) }
-    async fn increment_unresolved_retry(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> { Ok(()) }
+    async fn close(&self, _: Uuid) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn find_open(
+        &self,
+        _: i64,
+        _: &str,
+    ) -> Result<Option<PositionLifecycle>, RepositoryError> {
+        Ok(None)
+    }
+    async fn update_water_marks(
+        &self,
+        _: Uuid,
+        _: Option<Decimal>,
+        _: Option<Decimal>,
+    ) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn backfill_close(
+        &self,
+        _: Uuid,
+        _: Decimal,
+        _: Decimal,
+        _: Decimal,
+        _: Decimal,
+        _: Option<Decimal>,
+        _: Option<Decimal>,
+    ) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn save_unresolved(
+        &self,
+        _: Option<i64>,
+        _: Value,
+        _: &str,
+    ) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn find_unresolved_pending(
+        &self,
+        _: i64,
+    ) -> Result<Vec<UnresolvedFill>, RepositoryError> {
+        Ok(vec![])
+    }
+    async fn mark_unresolved_resolved(&self, _: Uuid) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn mark_unresolved_dead(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+    async fn increment_unresolved_retry(&self, _: Uuid, _: &str) -> Result<(), RepositoryError> {
+        Ok(())
+    }
 }
 
 fn noop_lifecycle_tracker() -> Arc<PositionLifecycleTracker> {

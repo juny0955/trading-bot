@@ -130,12 +130,10 @@ impl DecisionRepository for PostgresDecisionRepository {
     }
 
     async fn timeout(&self, id: Uuid) -> Result<(), RepositoryError> {
-        sqlx::query(
-            r#"UPDATE trade_decisions SET exchange_status = 'TIMEOUT' WHERE id = $1"#,
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(r#"UPDATE trade_decisions SET exchange_status = 'TIMEOUT' WHERE id = $1"#)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

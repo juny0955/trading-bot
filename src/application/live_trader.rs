@@ -115,7 +115,8 @@ impl TradingUseCase for LiveTrader {
         }
 
         let equity = self.account_state.available_balance();
-        self.finish_strategies(&mut strategies, equity, fear_greed).await?;
+        self.finish_strategies(&mut strategies, equity, fear_greed)
+            .await?;
         Ok(())
     }
 }
@@ -157,7 +158,9 @@ impl LiveTrader {
             if entry_symbol != &symbol {
                 continue;
             }
-            let ctx = self.make_ctx(instance_id, entry_symbol, equity, fear_greed).await;
+            let ctx = self
+                .make_ctx(instance_id, entry_symbol, equity, fear_greed)
+                .await;
             let cmds = on_event(&mut **strategy, event, &ctx)?;
             self.dispatch(instance_id, entry_symbol, cmds).await;
         }
@@ -187,11 +190,21 @@ impl LiveTrader {
                 StrategyCommand::SubmitOrder(req) => {
                     self.dispatch_submit(instance_id, symbol, req).await;
                 }
-                StrategyCommand::SetStopLoss { side, qty, stop_price } => {
-                    self.dispatch_sl(instance_id, symbol, side, qty, stop_price).await;
+                StrategyCommand::SetStopLoss {
+                    side,
+                    qty,
+                    stop_price,
+                } => {
+                    self.dispatch_sl(instance_id, symbol, side, qty, stop_price)
+                        .await;
                 }
-                StrategyCommand::SetTakeProfit { side, qty, stop_price } => {
-                    self.dispatch_tp(instance_id, symbol, side, qty, stop_price).await;
+                StrategyCommand::SetTakeProfit {
+                    side,
+                    qty,
+                    stop_price,
+                } => {
+                    self.dispatch_tp(instance_id, symbol, side, qty, stop_price)
+                        .await;
                 }
             }
         }
@@ -210,7 +223,9 @@ impl LiveTrader {
                 .await
             {
                 Ok(id) => {
-                    self.lifecycle_tracker.set_active_lifecycle(instance_id, symbol, id).await;
+                    self.lifecycle_tracker
+                        .set_active_lifecycle(instance_id, symbol, id)
+                        .await;
                     Some(id)
                 }
                 Err(e) => {
@@ -219,7 +234,9 @@ impl LiveTrader {
                 }
             }
         } else {
-            self.lifecycle_tracker.get_active_lifecycle(instance_id, symbol).await
+            self.lifecycle_tracker
+                .get_active_lifecycle(instance_id, symbol)
+                .await
         };
 
         let req = prepare_order_request(req, instance_id, symbol);
@@ -262,7 +279,10 @@ impl LiveTrader {
         qty: Decimal,
         stop_price: Decimal,
     ) {
-        let active_lid = self.lifecycle_tracker.get_active_lifecycle(instance_id, symbol).await;
+        let active_lid = self
+            .lifecycle_tracker
+            .get_active_lifecycle(instance_id, symbol)
+            .await;
         let req = prepare_order_request(
             OrderRequest {
                 order_type: OrderType::StopMarket,
@@ -298,7 +318,10 @@ impl LiveTrader {
         qty: Decimal,
         stop_price: Decimal,
     ) {
-        let active_lid = self.lifecycle_tracker.get_active_lifecycle(instance_id, symbol).await;
+        let active_lid = self
+            .lifecycle_tracker
+            .get_active_lifecycle(instance_id, symbol)
+            .await;
         let req = prepare_order_request(
             OrderRequest {
                 order_type: OrderType::StopMarket,
@@ -334,7 +357,11 @@ impl LiveTrader {
 
         // 지정가 타임아웃 주문 처리
         self.limit_monitor
-            .check_timeouts(&self.order_svc, &self.lifecycle_tracker, &self.trade_manager)
+            .check_timeouts(
+                &self.order_svc,
+                &self.lifecycle_tracker,
+                &self.trade_manager,
+            )
             .await;
 
         for key in keys {
@@ -360,7 +387,11 @@ impl LiveTrader {
                 continue;
             }
 
-            let entry_atr = self.trade_manager.get_entry_atr(&key).await.unwrap_or(Decimal::ZERO);
+            let entry_atr = self
+                .trade_manager
+                .get_entry_atr(&key)
+                .await
+                .unwrap_or(Decimal::ZERO);
             let is_long = position.side == Some(OrderSide::Buy);
 
             // high_water_mark 메모리 갱신 (롱: 최고가 추적)
@@ -380,7 +411,11 @@ impl LiveTrader {
                 is_long,
             };
 
-            let Some(cmds) = self.trade_manager.tick(key.clone(), &snapshot, &self.tm_params).await else {
+            let Some(cmds) = self
+                .trade_manager
+                .tick(key.clone(), &snapshot, &self.tm_params)
+                .await
+            else {
                 continue;
             };
 
@@ -388,14 +423,20 @@ impl LiveTrader {
                 continue;
             }
 
-            let lifecycle_id =
-                self.lifecycle_tracker.get_active_lifecycle(instance_id, symbol).await;
+            let lifecycle_id = self
+                .lifecycle_tracker
+                .get_active_lifecycle(instance_id, symbol)
+                .await;
 
             for cmd in cmds {
                 let decision_id = if let Some(lid) = lifecycle_id {
                     let market_ctx = build_market_ctx(bt, entry_atr, mid);
                     let pos_ctx = build_position_ctx(&position, &runtime, mid, entry_atr);
-                    match self.decision_logger.record(lid, symbol, &cmd, &market_ctx, &pos_ctx).await {
+                    match self
+                        .decision_logger
+                        .record(lid, symbol, &cmd, &market_ctx, &pos_ctx)
+                        .await
+                    {
                         Ok(id) => id,
                         Err(e) => {
                             warn!(error = %e, symbol, "decision 기록 실패");
@@ -406,7 +447,8 @@ impl LiveTrader {
                     None
                 };
 
-                self.execute_management_cmd(&key, &position, cmd, decision_id).await;
+                self.execute_management_cmd(&key, &position, cmd, decision_id)
+                    .await;
             }
         }
     }
@@ -439,8 +481,10 @@ impl LiveTrader {
                     Ok(order) => {
                         info!(id = %order.id, symbol, %qty, tp_stage, "부분 익절 주문");
                         self.trade_manager.set_pending_reduce(key, order.id).await;
-                        if let Some(lid) =
-                            self.lifecycle_tracker.get_active_lifecycle(*instance_id, symbol).await
+                        if let Some(lid) = self
+                            .lifecycle_tracker
+                            .get_active_lifecycle(*instance_id, symbol)
+                            .await
                         {
                             self.lifecycle_tracker.register_order(order.id, lid).await;
                         }
@@ -453,8 +497,14 @@ impl LiveTrader {
                 }
             }
 
-            ManagementCommand::ReplaceSL { cancel_order_id, desired_price, .. } => {
-                self.trade_manager.on_replace_sl_issued(key, desired_price).await;
+            ManagementCommand::ReplaceSL {
+                cancel_order_id,
+                desired_price,
+                ..
+            } => {
+                self.trade_manager
+                    .on_replace_sl_issued(key, desired_price)
+                    .await;
                 match self.order_svc.cancel(cancel_order_id).await {
                     Ok(_) => {
                         self.trade_manager.on_sl_cancelled(key).await;
@@ -487,12 +537,8 @@ impl LiveTrader {
                             Err(e) => {
                                 error!(error = %e, symbol, "새 SL 주문 실패");
                                 self.trade_manager.increment_sl_retry(key).await;
-                                reject_decision(
-                                    &self.decision_logger,
-                                    decision_id,
-                                    &e.to_string(),
-                                )
-                                .await;
+                                reject_decision(&self.decision_logger, decision_id, &e.to_string())
+                                    .await;
                             }
                         }
                     }
@@ -506,12 +552,14 @@ impl LiveTrader {
 
             ManagementCommand::EarlyExit { ref reason, .. } => {
                 warn!(symbol, %reason, "조기 손절");
-                self.force_close_position(key, position, decision_id, t0).await;
+                self.force_close_position(key, position, decision_id, t0)
+                    .await;
             }
 
             ManagementCommand::EmergencyClose { ref reason, .. } => {
                 warn!(symbol, %reason, "긴급 청산");
-                self.force_close_position(key, position, decision_id, t0).await;
+                self.force_close_position(key, position, decision_id, t0)
+                    .await;
             }
         }
     }
@@ -539,8 +587,10 @@ impl LiveTrader {
         match self.order_svc.submit(req).await {
             Ok(order) => {
                 info!(id = %order.id, symbol, "포지션 강제 청산 주문");
-                if let Some(lid) =
-                    self.lifecycle_tracker.get_active_lifecycle(*instance_id, symbol).await
+                if let Some(lid) = self
+                    .lifecycle_tracker
+                    .get_active_lifecycle(*instance_id, symbol)
+                    .await
                 {
                     self.lifecycle_tracker.register_order(order.id, lid).await;
                 }
@@ -604,11 +654,7 @@ fn on_event(
     }
 }
 
-fn prepare_order_request(
-    mut req: OrderRequest,
-    instance_id: i64,
-    symbol: &str,
-) -> OrderRequest {
+fn prepare_order_request(mut req: OrderRequest, instance_id: i64, symbol: &str) -> OrderRequest {
     req.strategy_instance_id = instance_id;
     if req.symbol.is_empty() {
         req.symbol = symbol.to_string();
@@ -648,7 +694,11 @@ fn build_market_ctx(bt: &BookTicker, entry_atr: Decimal, mid: Decimal) -> Decisi
         None
     };
     DecisionMarketContext {
-        atr: if !entry_atr.is_zero() { Some(entry_atr) } else { None },
+        atr: if !entry_atr.is_zero() {
+            Some(entry_atr)
+        } else {
+            None
+        },
         atr_pct,
         adx: None,
         spread_pct,
@@ -672,7 +722,9 @@ fn build_position_ctx(
         None
     };
     let dist_to_sl_atr = if !entry_atr.is_zero() {
-        runtime.desired_sl_price.map(|sl| ((mid - sl) / entry_atr).abs())
+        runtime
+            .desired_sl_price
+            .map(|sl| ((mid - sl) / entry_atr).abs())
     } else {
         None
     };
@@ -698,15 +750,11 @@ async fn ack_decision(
     }
 }
 
-async fn reject_decision(
-    logger: &Arc<DecisionLogger>,
-    decision_id: Option<Uuid>,
-    error: &str,
-) {
-    if let Some(id) = decision_id {
-        if let Err(e) = logger.reject(id, error).await {
-            warn!(error = %e, "decision REJECT 기록 실패");
-        }
+async fn reject_decision(logger: &Arc<DecisionLogger>, decision_id: Option<Uuid>, error: &str) {
+    if let Some(id) = decision_id
+        && let Err(e) = logger.reject(id, error).await
+    {
+        warn!(error = %e, "decision REJECT 기록 실패");
     }
 }
 

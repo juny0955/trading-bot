@@ -303,7 +303,11 @@ impl PostgresOrderRepository {
         .bind(fill.fee)
         .bind(&fill.fee_asset)
         .bind(fill.filled_at)
-        .bind(if fill.exchange_trade_id >= 0 { Some(fill.exchange_trade_id) } else { None })
+        .bind(if fill.exchange_trade_id >= 0 {
+            Some(fill.exchange_trade_id)
+        } else {
+            None
+        })
         .bind(fill.position_lifecycle_id)
         .execute(&self.pool)
         .await?;

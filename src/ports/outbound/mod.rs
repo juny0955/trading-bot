@@ -1,9 +1,9 @@
 pub mod account_source;
 pub mod config_repository;
 pub mod decision_repository;
-pub mod lifecycle_repository;
 pub mod exchange_info_source;
 pub mod fill_sink;
+pub mod lifecycle_repository;
 pub mod market_data_sink;
 pub mod market_data_source;
 pub mod notification_sink;

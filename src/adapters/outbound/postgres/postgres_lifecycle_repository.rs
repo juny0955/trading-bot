@@ -49,7 +49,11 @@ impl TryFrom<DbLifecycle> for PositionLifecycle {
         let side = match db.side.as_str() {
             "long" => LifecycleSide::Long,
             "short" => LifecycleSide::Short,
-            s => return Err(RepositoryError::Storage(format!("unknown lifecycle side: {s}"))),
+            s => {
+                return Err(RepositoryError::Storage(format!(
+                    "unknown lifecycle side: {s}"
+                )));
+            }
         };
         Ok(Self {
             id: db.id,
@@ -140,12 +144,10 @@ impl LifecycleRepository for PostgresLifecycleRepository {
     }
 
     async fn close(&self, id: Uuid) -> Result<(), RepositoryError> {
-        sqlx::query(
-            r#"UPDATE position_lifecycles SET closed_at = NOW() WHERE id = $1"#,
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(r#"UPDATE position_lifecycles SET closed_at = NOW() WHERE id = $1"#)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

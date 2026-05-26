@@ -230,7 +230,13 @@ impl TradeManager {
                 }
             }
             None => {
-                triggers.insert(key.clone(), TriggerState { last_price: mid, last_eval: now });
+                triggers.insert(
+                    key.clone(),
+                    TriggerState {
+                        last_price: mid,
+                        last_eval: now,
+                    },
+                );
                 true
             }
         }
@@ -445,7 +451,10 @@ mod tests {
         let runtime = PositionRuntimeState::default(); // tp_stage = 0
         let params = TradeManagerParams::default();
         let cmd = eval_partial_tp("BTCUSDT", &snap, &runtime, &params);
-        assert!(matches!(cmd, Some(ManagementCommand::PartialClose { tp_stage: 1, .. })));
+        assert!(matches!(
+            cmd,
+            Some(ManagementCommand::PartialClose { tp_stage: 1, .. })
+        ));
     }
 
     #[test]
@@ -472,9 +481,15 @@ mod tests {
     #[test]
     fn partial_tp_stage1_triggers_at_4x_atr() {
         let snap = snapshot(dec!(400), dec!(50), dec!(1)); // 400 >= 4 × 50 × 1 = 200
-        let runtime = PositionRuntimeState { tp_stage: 1, ..Default::default() };
+        let runtime = PositionRuntimeState {
+            tp_stage: 1,
+            ..Default::default()
+        };
         let params = TradeManagerParams::default();
         let cmd = eval_partial_tp("BTCUSDT", &snap, &runtime, &params);
-        assert!(matches!(cmd, Some(ManagementCommand::PartialClose { tp_stage: 2, .. })));
+        assert!(matches!(
+            cmd,
+            Some(ManagementCommand::PartialClose { tp_stage: 2, .. })
+        ));
     }
 }

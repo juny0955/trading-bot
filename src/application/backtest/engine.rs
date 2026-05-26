@@ -319,7 +319,11 @@ async fn dispatch(
             StrategyCommand::SubmitOrder(req) => {
                 executor.submit(req).await?;
             }
-            StrategyCommand::SetStopLoss { side, qty, stop_price } => {
+            StrategyCommand::SetStopLoss {
+                side,
+                qty,
+                stop_price,
+            } => {
                 // 기존 SL 취소 후 새 SL 설정
                 if let Some(old_id) = current_sl.take() {
                     executor.cancel_order_id(old_id)?;
@@ -336,7 +340,11 @@ async fn dispatch(
                     .await?;
                 *current_sl = Some(order.id);
             }
-            StrategyCommand::SetTakeProfit { side, qty, stop_price } => {
+            StrategyCommand::SetTakeProfit {
+                side,
+                qty,
+                stop_price,
+            } => {
                 if let Some(old_id) = current_tp.take() {
                     executor.cancel_order_id(old_id)?;
                 }

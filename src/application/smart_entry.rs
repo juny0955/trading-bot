@@ -52,13 +52,7 @@ impl SmartEntry {
     }
 
     /// 진입 방식을 결정합니다.
-    pub fn decide(
-        &self,
-        side: OrderSide,
-        bid: Decimal,
-        ask: Decimal,
-        atr: Decimal,
-    ) -> EntryMethod {
+    pub fn decide(&self, side: OrderSide, bid: Decimal, ask: Decimal, atr: Decimal) -> EntryMethod {
         if bid.is_zero() || ask.is_zero() {
             return EntryMethod::Market;
         }

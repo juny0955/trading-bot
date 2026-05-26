@@ -60,7 +60,9 @@ impl PositionLifecycleTracker {
         side: LifecycleSide,
         entry_atr: Option<Decimal>,
     ) -> Result<Uuid, RepositoryError> {
-        self.repo.open(strategy_instance_id, symbol, side, entry_atr).await
+        self.repo
+            .open(strategy_instance_id, symbol, side, entry_atr)
+            .await
     }
 
     /// lifecycle을 청산 완료 상태로 표시합니다 (closed_at = NOW()).
@@ -76,7 +78,9 @@ impl PositionLifecycleTracker {
         raw_payload: Value,
         reason: &str,
     ) -> Result<(), RepositoryError> {
-        self.repo.save_unresolved(exchange_trade_id, raw_payload, reason).await
+        self.repo
+            .save_unresolved(exchange_trade_id, raw_payload, reason)
+            .await
     }
 
     /// high/low water mark을 DB에 flush합니다.
@@ -93,18 +97,28 @@ impl PositionLifecycleTracker {
     /// (strategy_instance_id, symbol)에 활성 lifecycle을 등록합니다.
     /// open_lifecycle() 성공 후 LiveTrader에서 호출합니다.
     pub async fn set_active_lifecycle(&self, instance_id: i64, symbol: &str, lifecycle_id: Uuid) {
-        self.active.write().await.insert((instance_id, symbol.to_string()), lifecycle_id);
+        self.active
+            .write()
+            .await
+            .insert((instance_id, symbol.to_string()), lifecycle_id);
     }
 
     /// (strategy_instance_id, symbol)의 현재 활성 lifecycle_id를 조회합니다.
     /// ManagementCommand 실행 시 fill 귀속에 사용합니다.
     pub async fn get_active_lifecycle(&self, instance_id: i64, symbol: &str) -> Option<Uuid> {
-        self.active.read().await.get(&(instance_id, symbol.to_string())).copied()
+        self.active
+            .read()
+            .await
+            .get(&(instance_id, symbol.to_string()))
+            .copied()
     }
 
     /// 포지션 종료 시 활성 lifecycle 매핑을 제거합니다.
     pub async fn clear_active_lifecycle(&self, instance_id: i64, symbol: &str) {
-        self.active.write().await.remove(&(instance_id, symbol.to_string()));
+        self.active
+            .write()
+            .await
+            .remove(&(instance_id, symbol.to_string()));
     }
 
     pub fn repo(&self) -> &Arc<dyn LifecycleRepository> {

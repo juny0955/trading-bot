@@ -49,7 +49,11 @@ impl OutcomeBackfiller {
     }
 
     async fn backfill_decisions(&self) {
-        let decisions = match self.decision_repo.find_pending_backfill(BACKFILL_BATCH).await {
+        let decisions = match self
+            .decision_repo
+            .find_pending_backfill(BACKFILL_BATCH)
+            .await
+        {
             Ok(d) => d,
             Err(e) => {
                 error!(error = %e, "trade_decisions 백필 조회 실패");
@@ -99,7 +103,11 @@ impl OutcomeBackfiller {
             if fill.retry_count >= DEAD_LETTER_THRESHOLD {
                 let msg = format!("retry_count({}) exceeded threshold", fill.retry_count);
                 warn!(id = %fill.id, exchange_trade_id = ?fill.exchange_trade_id, "unresolved_fill DEAD 처리");
-                if let Err(e) = self.lifecycle_repo.mark_unresolved_dead(fill.id, &msg).await {
+                if let Err(e) = self
+                    .lifecycle_repo
+                    .mark_unresolved_dead(fill.id, &msg)
+                    .await
+                {
                     error!(id = %fill.id, error = %e, "DEAD 처리 실패");
                 }
                 continue;

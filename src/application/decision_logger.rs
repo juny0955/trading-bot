@@ -1,6 +1,4 @@
-use crate::domain::lifecycle::{
-    DecisionMarketContext, DecisionPositionContext, ManagementCommand,
-};
+use crate::domain::lifecycle::{DecisionMarketContext, DecisionPositionContext, ManagementCommand};
 use crate::domain::trade_decision::TradeDecisionInsert;
 use crate::ports::order_repository::RepositoryError;
 use crate::ports::outbound::decision_repository::DecisionRepository;
@@ -58,7 +56,10 @@ impl DecisionLogger {
         let id = self.repo.insert(&insert).await?;
 
         if let ManagementCommand::ReplaceSL { desired_price, .. } = command {
-            self.last_sl_prices.write().await.insert(lifecycle_id, *desired_price);
+            self.last_sl_prices
+                .write()
+                .await
+                .insert(lifecycle_id, *desired_price);
         }
 
         Ok(Some(id))
@@ -130,7 +131,11 @@ fn build_insert(
 
 fn command_to_record(command: &ManagementCommand) -> (String, serde_json::Value) {
     match command {
-        ManagementCommand::ReplaceSL { cancel_order_id, desired_price, .. } => (
+        ManagementCommand::ReplaceSL {
+            cancel_order_id,
+            desired_price,
+            ..
+        } => (
             "replace_sl".into(),
             json!({
                 "cancel_order_id": cancel_order_id.to_string(),
@@ -144,13 +149,11 @@ fn command_to_record(command: &ManagementCommand) -> (String, serde_json::Value)
                 "tp_stage": tp_stage,
             }),
         ),
-        ManagementCommand::EarlyExit { reason, .. } => (
-            "early_exit".into(),
-            json!({ "reason": reason }),
-        ),
-        ManagementCommand::EmergencyClose { reason, .. } => (
-            "emergency_close".into(),
-            json!({ "reason": reason }),
-        ),
+        ManagementCommand::EarlyExit { reason, .. } => {
+            ("early_exit".into(), json!({ "reason": reason }))
+        }
+        ManagementCommand::EmergencyClose { reason, .. } => {
+            ("emergency_close".into(), json!({ "reason": reason }))
+        }
     }
 }

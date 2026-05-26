@@ -33,7 +33,9 @@ pub struct LimitOrderMonitor {
 
 impl LimitOrderMonitor {
     pub fn new() -> Self {
-        Self { entries: RwLock::new(HashMap::new()) }
+        Self {
+            entries: RwLock::new(HashMap::new()),
+        }
     }
 
     /// 지정가 주문을 모니터에 등록합니다.
@@ -48,7 +50,12 @@ impl LimitOrderMonitor {
         let deadline = Instant::now() + Duration::from_secs(timeout_secs);
         self.entries.write().await.insert(
             order_id,
-            LimitEntry { deadline, market_replace, lifecycle_id, key },
+            LimitEntry {
+                deadline,
+                market_replace,
+                lifecycle_id,
+                key,
+            },
         );
     }
 
@@ -65,9 +72,15 @@ impl LimitOrderMonitor {
         // 만료된 항목 수집
         let expired: Vec<(Uuid, LimitEntry)> = {
             let mut entries = self.entries.write().await;
-            let expired_ids: Vec<Uuid> =
-                entries.iter().filter(|(_, e)| now >= e.deadline).map(|(id, _)| *id).collect();
-            expired_ids.into_iter().filter_map(|id| entries.remove(&id).map(|e| (id, e))).collect()
+            let expired_ids: Vec<Uuid> = entries
+                .iter()
+                .filter(|(_, e)| now >= e.deadline)
+                .map(|(id, _)| *id)
+                .collect();
+            expired_ids
+                .into_iter()
+                .filter_map(|id| entries.remove(&id).map(|e| (id, e)))
+                .collect()
         };
 
         for (order_id, entry) in expired {
