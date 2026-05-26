@@ -92,6 +92,7 @@ impl Position {
     ///     fee_asset: "USDT".into(),
     ///     filled_at: Utc::now(),
     ///     exchange_trade_id: 1,
+    ///     position_lifecycle_id: None,
     /// };
     ///
     /// let (position, _) = Position::default().apply(&fill).unwrap();

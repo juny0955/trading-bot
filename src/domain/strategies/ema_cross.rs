@@ -171,8 +171,30 @@ fn cross_signal(prev_diff: Option<Decimal>, diff: Decimal) -> Option<OrderSide> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::position::Position;
     use anyhow::Result;
     use rust_decimal_macros::dec;
+
+    fn make_bar(price: Decimal) -> Bar {
+        Bar {
+            symbol: "BTCUSDT".into(),
+            ts_ns: 1,
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume: dec!(1),
+        }
+    }
+
+    fn make_ctx() -> Context {
+        Context {
+            now_ns: 1,
+            equity: dec!(10000),
+            position: Position::default(),
+            fear_greed: None,
+        }
+    }
 
     #[test]
     fn cross_signal_detects_direction_changes() -> Result<()> {
@@ -186,6 +208,63 @@ mod tests {
     fn new_rejects_invalid_config() -> Result<()> {
         assert!(EmaCross::new(21, 9, dec!(1)).is_err());
         assert!(EmaCross::new(9, 21, dec!(0)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn on_bar_silent_during_warmup() -> Result<()> {
+        // fast=2, slow=3: slow_n=3 봉이 쌓여야 워밍업 완료
+        let mut strategy = EmaCross::new(2, 3, dec!(1))?;
+        let ctx = make_ctx();
+        for price in [dec!(100), dec!(90), dec!(80)] {
+            let cmds = strategy.on_bar(&make_bar(price), &ctx)?;
+            assert!(cmds.is_empty(), "워밍업 전 명령 없음");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn on_bar_emits_buy_on_golden_cross() -> Result<()> {
+        // fast=2(k=2/3), slow=3(k=1/2) 최소 주기로 빠르게 교차 유도
+        // [100→90→80] 하락 후 [100] 급등 → fast EMA가 slow EMA를 상향 돌파
+        let mut strategy = EmaCross::new(2, 3, dec!(1))?;
+        let ctx = make_ctx();
+
+        // 워밍업 + prev_diff 설정 (첫 warmed-up 봉에서 diff<0 기록)
+        for price in [dec!(100), dec!(90), dec!(80), dec!(80)] {
+            strategy.on_bar(&make_bar(price), &ctx)?;
+        }
+
+        // 급등으로 fast > slow 교차 → Buy 진입
+        let cmds = strategy.on_bar(&make_bar(dec!(200)), &ctx)?;
+        assert!(
+            cmds.iter().any(|c| matches!(
+                c,
+                StrategyCommand::SubmitOrder(r) if r.side == OrderSide::Buy && !r.reduce_only
+            )),
+            "골든 크로스 시 Buy 진입 주문 필요"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn on_bar_emits_sell_on_death_cross() -> Result<()> {
+        // [100→110→120] 상승 후 [50] 급락 → fast EMA가 slow EMA를 하향 돌파
+        let mut strategy = EmaCross::new(2, 3, dec!(1))?;
+        let ctx = make_ctx();
+
+        for price in [dec!(100), dec!(110), dec!(120), dec!(120)] {
+            strategy.on_bar(&make_bar(price), &ctx)?;
+        }
+
+        let cmds = strategy.on_bar(&make_bar(dec!(10)), &ctx)?;
+        assert!(
+            cmds.iter().any(|c| matches!(
+                c,
+                StrategyCommand::SubmitOrder(r) if r.side == OrderSide::Sell && !r.reduce_only
+            )),
+            "데스 크로스 시 Sell 진입 주문 필요"
+        );
         Ok(())
     }
 }

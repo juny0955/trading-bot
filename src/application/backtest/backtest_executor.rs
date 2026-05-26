@@ -205,24 +205,26 @@ impl BacktestOrderExecutor {
     /// # Examples
     ///
     /// ```
+    /// # use tokio::runtime::Runtime;
     /// use rust_decimal_macros::dec;
     /// use trading_bot::application::backtest::backtest_executor::BacktestOrderExecutor;
     /// use trading_bot::domain::order::{OrderRequest, OrderSide, OrderType};
+    /// use trading_bot::ports::outbound::order_executor::OrderExecutor;
     ///
-    /// # tokio_test::block_on(async {
-    /// let ex = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
-    /// // 먼저 롱 포지션 진입
-    /// ex.submit(OrderRequest { order_type: OrderType::Market, side: OrderSide::Buy, qty: dec!(1), symbol: "X".into(), ..Default::default() }).await.unwrap();
-    /// ex.drain_pending(dec!(100), dec!(100), 1).unwrap();
-    /// // SL 설정
-    /// ex.submit(OrderRequest { order_type: OrderType::StopMarket, side: OrderSide::Sell, qty: dec!(1), stop_price: Some(dec!(95)), reduce_only: true, symbol: "X".into(), ..Default::default() }).await.unwrap();
-    /// // 저가가 SL 미달
-    /// let fills = ex.drain_stops(dec!(98), dec!(102), 2).unwrap();
-    /// assert!(fills.is_empty());
-    /// // 저가가 SL 도달 → 체결
-    /// let fills = ex.drain_stops(dec!(90), dec!(99), 3).unwrap();
-    /// assert_eq!(fills.len(), 1);
-    /// # })
+    /// Runtime::new().unwrap().block_on(async {
+    ///     let ex = BacktestOrderExecutor::new(dec!(10_000), dec!(0)).unwrap();
+    ///     // 먼저 롱 포지션 진입
+    ///     ex.submit(OrderRequest { order_type: OrderType::Market, side: OrderSide::Buy, qty: dec!(1), symbol: "X".into(), ..Default::default() }).await.unwrap();
+    ///     ex.drain_pending(dec!(100), dec!(100), 1).unwrap();
+    ///     // SL 설정
+    ///     ex.submit(OrderRequest { order_type: OrderType::StopMarket, side: OrderSide::Sell, qty: dec!(1), stop_price: Some(dec!(95)), reduce_only: true, symbol: "X".into(), ..Default::default() }).await.unwrap();
+    ///     // 저가가 SL 미달
+    ///     let fills = ex.drain_stops(dec!(98), dec!(102), 2).unwrap();
+    ///     assert!(fills.is_empty());
+    ///     // 저가가 SL 도달 → 체결
+    ///     let fills = ex.drain_stops(dec!(90), dec!(99), 3).unwrap();
+    ///     assert_eq!(fills.len(), 1);
+    /// });
     /// ```
     pub fn drain_stops(
         &self,
