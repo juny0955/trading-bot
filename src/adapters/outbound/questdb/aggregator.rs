@@ -10,6 +10,10 @@ pub fn minute_bucket(event_time_ns: i64) -> i64 {
     event_time_ns - (event_time_ns % MINUTE_NS)
 }
 
+fn d(v: &Decimal) -> f64 {
+    v.to_f64().unwrap_or(0.0)
+}
+
 // ── Trade accumulator (per symbol) ──────────────────────────────────
 // OHLCV는 kline 테이블 참조. buy/sell split + vwap + delta만 저장.
 
@@ -40,19 +44,19 @@ impl TradeAcc {
             return Ok(());
         }
         let vwap = if self.total_volume.is_zero() {
-            Decimal::ZERO
+            0.0
         } else {
-            self.vwap_num / self.total_volume
+            d(&self.vwap_num) / d(&self.total_volume)
         };
-        let delta_volume = self.buy_volume - self.sell_volume;
+        let delta_volume = d(&self.buy_volume) - d(&self.sell_volume);
 
         buf.table("trade_features_1m")?
             .symbol("symbol", symbol)?
-            .column_dec("buy_volume", &self.buy_volume)?
-            .column_dec("sell_volume", &self.sell_volume)?
-            .column_dec("delta_volume", &delta_volume)?
+            .column_f64("buy_volume", d(&self.buy_volume))?
+            .column_f64("sell_volume", d(&self.sell_volume))?
+            .column_f64("delta_volume", delta_volume)?
             .column_i64("trade_count", self.trade_count)?
-            .column_dec("vwap", &vwap)?
+            .column_f64("vwap", vwap)?
             .at(TimestampNanos::new(ts_ns))?;
         Ok(())
     }
@@ -91,20 +95,16 @@ impl OrderbookAcc {
         let (Some((ask1_p, _)), Some((bid1_p, _))) = (self.ask[0], self.bid[0]) else {
             return;
         };
-        let spread = match (ask1_p - bid1_p).to_f64() {
-            Some(v) if v >= 0.0 => v,
-            _ => return,
-        };
+        let spread = d(&ask1_p) - d(&bid1_p);
+        if spread < 0.0 {
+            return;
+        }
 
-        let bid_total: f64 = self
-            .bid
-            .iter()
-            .filter_map(|s| s.and_then(|(_, q)| q.to_f64()))
+        let bid_total: f64 = self.bid.iter()
+            .filter_map(|s| s.map(|(_, q)| d(&q)))
             .sum();
-        let ask_total: f64 = self
-            .ask
-            .iter()
-            .filter_map(|s| s.and_then(|(_, q)| q.to_f64()))
+        let ask_total: f64 = self.ask.iter()
+            .filter_map(|s| s.map(|(_, q)| d(&q)))
             .sum();
         let imbalance = if bid_total + ask_total > 0.0 {
             bid_total / (bid_total + ask_total)
@@ -131,29 +131,27 @@ impl OrderbookAcc {
         let imbalance_var = (self.imbalance_sum_sq / n) - (imbalance_avg * imbalance_avg);
         let imbalance_std = imbalance_var.max(0.0).sqrt();
 
-        let to_dec = |v: f64| Decimal::try_from(v).unwrap_or(Decimal::ZERO);
+        const BID_P: [&str; 3] = ["bid1_price", "bid2_price", "bid3_price"];
+        const BID_Q: [&str; 3] = ["bid1_qty",   "bid2_qty",   "bid3_qty"  ];
+        const ASK_P: [&str; 3] = ["ask1_price", "ask2_price", "ask3_price"];
+        const ASK_Q: [&str; 3] = ["ask1_qty",   "ask2_qty",   "ask3_qty"  ];
 
         let row = buf.table("orderbook_features_1m")?;
         row.symbol("symbol", symbol)?;
 
-        const BID_P: [&str; 3] = ["bid1_price", "bid2_price", "bid3_price"];
-        const BID_Q: [&str; 3] = ["bid1_qty", "bid2_qty", "bid3_qty"];
-        const ASK_P: [&str; 3] = ["ask1_price", "ask2_price", "ask3_price"];
-        const ASK_Q: [&str; 3] = ["ask1_qty", "ask2_qty", "ask3_qty"];
-
         for i in 0..3 {
             if let Some((p, q)) = self.bid[i] {
-                row.column_dec(BID_P[i], &p)?.column_dec(BID_Q[i], &q)?;
+                row.column_f64(BID_P[i], d(&p))?.column_f64(BID_Q[i], d(&q))?;
             }
             if let Some((p, q)) = self.ask[i] {
-                row.column_dec(ASK_P[i], &p)?.column_dec(ASK_Q[i], &q)?;
+                row.column_f64(ASK_P[i], d(&p))?.column_f64(ASK_Q[i], d(&q))?;
             }
         }
 
-        row.column_dec("spread_avg", &to_dec(spread_avg))?
-            .column_dec("spread_max", &to_dec(self.spread_max))?
-            .column_dec("imbalance_avg", &to_dec(imbalance_avg))?
-            .column_dec("imbalance_std", &to_dec(imbalance_std))?
+        row.column_f64("spread_avg",    spread_avg)?
+            .column_f64("spread_max",    self.spread_max)?
+            .column_f64("imbalance_avg", imbalance_avg)?
+            .column_f64("imbalance_std", imbalance_std)?
             .at(TimestampNanos::new(ts_ns))?;
         Ok(())
     }
@@ -184,9 +182,9 @@ impl MarkPriceState {
     fn flush(&self, buf: &mut Buffer, symbol: &str, ts_ns: i64) -> questdb::Result<()> {
         buf.table("mark_price_1m")?
             .symbol("symbol", symbol)?
-            .column_dec("mark_price", &self.mark_price)?
-            .column_dec("index_price", &self.index_price)?
-            .column_dec("funding_rate", &self.funding_rate)?
+            .column_f64("mark_price",   d(&self.mark_price))?
+            .column_f64("index_price",  d(&self.index_price))?
+            .column_f64("funding_rate", d(&self.funding_rate))?
             .column_i64("next_funding_time", self.next_funding_time_ms)?
             .at(TimestampNanos::new(ts_ns))?;
         Ok(())
@@ -311,7 +309,7 @@ mod tests {
     fn trade_acc_buy_sell_split() {
         let mut acc = TradeAcc::default();
         acc.update(&make_trade("BTCUSDT", dec!(100), dec!(2), false, 0)); // taker buy
-        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0)); // taker sell
+        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0));  // taker sell
         assert_eq!(acc.buy_volume, dec!(2));
         assert_eq!(acc.sell_volume, dec!(1));
         assert_eq!(acc.trade_count, 2);

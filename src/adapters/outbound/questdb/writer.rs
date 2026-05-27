@@ -5,6 +5,7 @@ use crate::domain::market_data::{FearGreed, Kline, Trade};
 use crate::ports::market_data_sink::MarketDataSink;
 use async_trait::async_trait;
 use questdb::ingress::{Buffer, ProtocolVersion, Sender, TimestampNanos};
+use rust_decimal::prelude::ToPrimitive;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{MissedTickBehavior, interval};
@@ -44,7 +45,7 @@ pub async fn run(
         }
     };
 
-    let mut buf = Buffer::new(ProtocolVersion::V3);
+    let mut buf = Buffer::new(ProtocolVersion::V2);
     let mut rows: usize = 0;
     let mut agg = MinuteAggregator::new();
 
@@ -144,48 +145,52 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
 
 fn event_time_ns(event: &MarketDataEvent) -> i64 {
     match event {
-        MarketDataEvent::Trade(d) => d.time_ns,
-        MarketDataEvent::Depth(d) => d.event_time_ns,
+        MarketDataEvent::Trade(d)      => d.time_ns,
+        MarketDataEvent::Depth(d)      => d.event_time_ns,
         MarketDataEvent::BookTicker(d) => d.event_time_ns,
-        MarketDataEvent::Kline(d) => d.event_time_ns,
-        MarketDataEvent::MarkPrice(d) => d.event_time_ns,
-        MarketDataEvent::FearGreed(d) => d.timestamp_sec * 1_000_000_000,
+        MarketDataEvent::Kline(d)      => d.event_time_ns,
+        MarketDataEvent::MarkPrice(d)  => d.event_time_ns,
+        MarketDataEvent::FearGreed(d)  => d.timestamp_sec * 1_000_000_000,
     }
 }
 
-fn append_raw_trade(buf: &mut Buffer, d: &Trade) -> questdb::Result<()> {
+fn d(v: &rust_decimal::Decimal) -> f64 {
+    v.to_f64().unwrap_or(0.0)
+}
+
+fn append_raw_trade(buf: &mut Buffer, t: &Trade) -> questdb::Result<()> {
     buf.table("raw_trade")?
-        .symbol("symbol", &d.symbol)?
-        .column_dec("price", &d.price)?
-        .column_dec("quantity", &d.quantity)?
-        .column_bool("buyer_is_market_maker", d.buyer_is_market_maker)?
-        .at(TimestampNanos::new(d.time_ns))?;
+        .symbol("symbol", &t.symbol)?
+        .column_f64("price", d(&t.price))?
+        .column_f64("quantity", d(&t.quantity))?
+        .column_bool("buyer_is_market_maker", t.buyer_is_market_maker)?
+        .at(TimestampNanos::new(t.time_ns))?;
     Ok(())
 }
 
-fn append_kline(buf: &mut Buffer, d: &Kline) -> questdb::Result<()> {
+fn append_kline(buf: &mut Buffer, k: &Kline) -> questdb::Result<()> {
     buf.table("kline")?
-        .symbol("symbol", &d.symbol)?
-        .column_i64("open_time", d.open_time_ms)?
-        .column_dec("open", &d.open)?
-        .column_dec("high", &d.high)?
-        .column_dec("low", &d.low)?
-        .column_dec("close", &d.close)?
-        .column_dec("volume", &d.volume)?
-        .column_dec("quote_volume", &d.quote_volume)?
-        .column_i64("num_trades", d.num_trades)?
-        .column_bool("is_closed", d.is_closed)?
-        .at(TimestampNanos::new(d.event_time_ns))?;
+        .symbol("symbol", &k.symbol)?
+        .column_i64("open_time", k.open_time_ms)?
+        .column_f64("open", d(&k.open))?
+        .column_f64("high", d(&k.high))?
+        .column_f64("low", d(&k.low))?
+        .column_f64("close", d(&k.close))?
+        .column_f64("volume", d(&k.volume))?
+        .column_f64("quote_volume", d(&k.quote_volume))?
+        .column_i64("num_trades", k.num_trades)?
+        .column_bool("is_closed", k.is_closed)?
+        .at(TimestampNanos::new(k.event_time_ns))?;
     Ok(())
 }
 
-fn append_fng(buf: &mut Buffer, d: &FearGreed) -> questdb::Result<()> {
-    if d.timestamp_sec == 0 {
+fn append_fng(buf: &mut Buffer, f: &FearGreed) -> questdb::Result<()> {
+    if f.timestamp_sec == 0 {
         return Ok(());
     }
     buf.table("fear_greed_index")?
-        .symbol("status", d.status.as_str())?
-        .column_str("value", &d.value)?
-        .at(TimestampNanos::new(d.timestamp_sec * 1_000_000_000))?;
+        .symbol("status", f.status.as_str())?
+        .column_str("value", &f.value)?
+        .at(TimestampNanos::new(f.timestamp_sec * 1_000_000_000))?;
     Ok(())
 }
