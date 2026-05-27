@@ -27,6 +27,7 @@
 ### 2. 복선성 및 안정성 (Resilience & Consistency)
 - **Outbox 패턴**: 주문 처리 시 DB 기록과 거래소 전송 사이의 일관성을 위해 Outbox 패턴을 적용하여 프로세스 다운 시에도 미결제 주문을 복구할 수 있습니다.
 - **주기적 정정(Reconciliation)**: WebSocket 이벤트 누락이나 거래소 지연에 대비해 백그라운드에서 주기적으로 로컬-거래소 간 상태를 대조하고 정정합니다.
+- **Adaptive Management**: `TradeManager`를 통해 포지션 진입 후에도 실시간으로 리스크를 관리하며, `DecisionLogger`를 통해 모든 행동의 근거를 기록하여 시스템의 투명성을 확보합니다.
 
 ### 3. 테스트 용이성 (Testability)
 - **Mocking**: 포트(Port) 인터페이스를 통해 실제 거래소나 DB 없이도 도메인 로직을 검증할 수 있습니다.

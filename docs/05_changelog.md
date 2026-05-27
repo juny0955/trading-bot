@@ -1,5 +1,22 @@
 # 05. 변경 이력 (Changelog)
 
+## [v0.4.0] - 2026-05-27
+
+### ✨ 어댑티브 포지션 관리 (Adaptive Position Management)
+- **PositionLifecycle 도입**: 진입부터 청산까지의 전 과정을 하나의 생애주기로 관리하며, 실현 손익, 수수료, MFE/MAE(최대 수익/낙폭) 등의 성과 지표를 정밀하게 추적합니다.
+- **PositionRuntimeState 추가**: `TradeManager`의 가변 상태를 영속화하여 시스템 재시작 시에도 전략적 포지션 관리가 중단 없이 이어지도록 보장합니다.
+- **TradeManager 구현**: 포지션 보유 중 시장 상황에 따라 지능적인 관리 명령(트레일링 스탑, 단계별 부분 익절, 조기 종료 등)을 생성하는 엔진을 추가하였습니다.
+- **포지션 상태 추적기(PositionLifecycleTracker)**: 체결 데이터를 기반으로 포지션 생애주기를 자동으로 생성하고 갱신하는 기능을 구현하였습니다.
+
+### 🧠 지능형 주문 및 결정 로직 (Smart Execution & Decision)
+- **SmartEntry 시스템**: 시장의 스프레드와 변동성(ATR)을 분석하여 최적의 진입 방식(지정가 vs 시장가)을 자동으로 결정합니다.
+- **DecisionLogger & OutcomeBackfiller**: 모든 트레이딩 결정의 맥락(지표 상태 등)을 기록하고, 일정 시간 경과 후의 결과를 백필하여 전략 개선 및 강화학습(RL)을 위한 데이터셋을 구축합니다.
+- **미체결 주문 모니터링(LimitOrderMonitor)**: 지정가 주문의 체결 여부를 감시하고, 타임아웃 발생 시 시장가 전환 등의 후속 조치를 수행합니다.
+
+### 📈 전략 및 도메인 고도화 (Strategy & Domain)
+- **MarketFilter 전략 추가**: EMA, ATR, ADX 등 다양한 기술적 지표를 결합하여 시장 상황을 필터링하고 진입 신호를 생성하는 복합 전략을 구현하였습니다.
+- **도메인 모델 확장**: `PositionLifecycle`, `TradeDecision`, `ManagementCommand` 등 신규 비즈니스 엔티티를 추가하여 복잡한 거래 시나리오를 지원합니다.
+
 ## [v0.3.0] - 2026-05-26
 
 ### ✨ 핵심 기능 고도화 (Advanced Trading Features)
