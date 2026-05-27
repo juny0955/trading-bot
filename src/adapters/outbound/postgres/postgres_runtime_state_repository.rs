@@ -71,22 +71,39 @@ impl RuntimeStateRepository for PostgresRuntimeStateRepository {
     async fn load_all(
         &self,
     ) -> Result<Vec<(i64, String, PositionRuntimeState, Option<Decimal>)>, RepositoryError> {
-        let rows: Vec<(i64, String, i16, Option<Uuid>, Option<Uuid>, Option<Decimal>, Option<Decimal>, Option<Decimal>)> =
-            sqlx::query_as(
-                r#"
+        let rows: Vec<(
+            i64,
+            String,
+            i16,
+            Option<Uuid>,
+            Option<Uuid>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<Decimal>,
+        )> = sqlx::query_as(
+            r#"
                 SELECT strategy_instance_id, symbol, tp_stage, sl_order_id,
                        pending_reduce_order_id, high_water_mark, entry_atr, desired_sl_price
                 FROM position_runtime_states
                 "#,
-            )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
 
         Ok(rows
             .into_iter()
             .map(
-                |(instance_id, symbol, tp_stage, sl_order_id, pending_reduce_order_id, high_water_mark, entry_atr, desired_sl_price)| {
+                |(
+                    instance_id,
+                    symbol,
+                    tp_stage,
+                    sl_order_id,
+                    pending_reduce_order_id,
+                    high_water_mark,
+                    entry_atr,
+                    desired_sl_price,
+                )| {
                     let state = PositionRuntimeState {
                         tp_stage: tp_stage as u8,
                         sl_order_id,

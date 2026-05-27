@@ -98,7 +98,11 @@ impl TradeManager {
             self.entry_atrs.write().await.insert(key.clone(), atr);
         }
         let (instance_id, symbol) = &key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &state, entry_atr).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &state, entry_atr)
+            .await
+        {
             warn!(error = %e, symbol, "runtime state 초기화 DB flush 실패");
         }
     }
@@ -158,7 +162,11 @@ impl TradeManager {
             }
         };
         let (instance_id, symbol) = key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &snapshot, None)
+            .await
+        {
             warn!(error = %e, symbol, "pending_reduce DB flush 실패");
         }
     }
@@ -176,7 +184,11 @@ impl TradeManager {
             }
         };
         let (instance_id, symbol) = key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &snapshot, None)
+            .await
+        {
             warn!(error = %e, symbol, "tp_stage DB flush 실패");
         }
     }
@@ -197,7 +209,11 @@ impl TradeManager {
             }
         };
         let (instance_id, symbol) = key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &snapshot, None)
+            .await
+        {
             warn!(error = %e, symbol, "sl_order DB flush 실패");
         }
     }
@@ -215,7 +231,11 @@ impl TradeManager {
             }
         };
         let (instance_id, symbol) = key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &snapshot, None)
+            .await
+        {
             warn!(error = %e, symbol, "sl_cancelled DB flush 실패");
         }
     }
@@ -234,7 +254,11 @@ impl TradeManager {
         };
         // sl_replace_in_flight은 DB 스키마에 없으므로 저장되지 않음 (재시작 시 false 리셋)
         let (instance_id, symbol) = key;
-        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+        if let Err(e) = self
+            .repo
+            .upsert(*instance_id, symbol, &snapshot, None)
+            .await
+        {
             warn!(error = %e, symbol, "replace_sl_issued DB flush 실패");
         }
     }
@@ -291,10 +315,17 @@ impl TradeManager {
         let snapshot = self.states.read().await.get(key).cloned();
         if let Some(state) = snapshot {
             let (instance_id, symbol) = key;
-            if let Err(e) = self.repo.upsert(*instance_id, symbol, &state, entry_atr).await {
+            if let Err(e) = self
+                .repo
+                .upsert(*instance_id, symbol, &state, entry_atr)
+                .await
+            {
                 warn!(error = %e, symbol, "HWM DB flush 실패");
             } else {
-                self.last_flushed_hwm.write().await.insert(key.clone(), new_hwm);
+                self.last_flushed_hwm
+                    .write()
+                    .await
+                    .insert(key.clone(), new_hwm);
             }
         }
     }

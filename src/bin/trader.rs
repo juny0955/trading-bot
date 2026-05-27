@@ -30,8 +30,8 @@ use trading_bot::application::outbox_order_service::OutboxOrderService;
 use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use trading_bot::application::risk_controller::RiskController;
 use trading_bot::application::trade_manager::{PositionKey, TradeManager, TradeManagerParams};
-use trading_bot::domain::lifecycle::PositionRuntimeState;
 use trading_bot::bootstrap::AppBootstrap;
+use trading_bot::domain::lifecycle::PositionRuntimeState;
 use trading_bot::domain::order::Fill;
 use trading_bot::domain::strategies::{Strategy, StrategyInstance, create_strategy};
 use trading_bot::ports::fill_sink::FillSink;
@@ -311,17 +311,11 @@ async fn recover_runtime_states(
     for (instance_id, symbol, state, entry_atr) in saved {
         let key: PositionKey = (instance_id, symbol.clone());
         if open_keys.contains(&key) {
-            trade_manager
-                .restore_position(key, state, entry_atr)
-                .await;
+            trade_manager.restore_position(key, state, entry_atr).await;
             info!(instance_id, %symbol, "runtime state 복원 완료");
         } else {
             // 포지션이 이미 닫혔으면 stale record 정리
-            if let Err(e) = boot
-                .runtime_state_repo
-                .delete(instance_id, &symbol)
-                .await
-            {
+            if let Err(e) = boot.runtime_state_repo.delete(instance_id, &symbol).await {
                 warn!(error = %e, instance_id, %symbol, "stale runtime state 삭제 실패");
             } else {
                 warn!(instance_id, %symbol, "stale runtime state 삭제 완료");
