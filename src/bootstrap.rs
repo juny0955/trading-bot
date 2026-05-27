@@ -4,6 +4,7 @@ use crate::adapters::outbound::postgres::pool::init_db;
 use crate::adapters::outbound::postgres::postgres_config_repository::PostgresConfigRepository;
 use crate::adapters::outbound::postgres::postgres_position_repository::PostgresPositionRepository;
 use crate::adapters::outbound::postgres::postgres_risk_config_repository::PostgresRiskConfigRepository;
+use crate::adapters::outbound::postgres::postgres_runtime_state_repository::PostgresRuntimeStateRepository;
 use crate::adapters::outbound::postgres::postgres_strategy_repository::PostgresStrategyRepository;
 use crate::application::account_state::AccountState;
 use crate::config::AppConfig;
@@ -12,6 +13,7 @@ use crate::domain::account::AccountSnapshot;
 use crate::init::setup;
 use crate::ports::config_repository::ConfigRepository;
 use crate::ports::outbound::risk_config_source::{RiskConfigSource, RiskLimits};
+use crate::ports::outbound::runtime_state_repository::RuntimeStateRepository;
 use crate::ports::position_repository::PositionRepository;
 use crate::ports::strategy_repository::StrategyRepository;
 use anyhow::Result;
@@ -31,6 +33,7 @@ pub struct AppBootstrap {
     pub account_state: Arc<AccountState>,
     pub risk_limits: Arc<ArcSwap<RiskLimits>>,
     pub book_ticker_cache: Arc<BookTickerCache>,
+    pub runtime_state_repo: Arc<dyn RuntimeStateRepository>,
 }
 
 impl AppBootstrap {
@@ -63,6 +66,9 @@ impl AppBootstrap {
             fetched_at: Utc::now(),
         }));
 
+        let runtime_state_repo: Arc<dyn RuntimeStateRepository> =
+            Arc::new(PostgresRuntimeStateRepository::new(pool.clone()));
+
         Ok(Self {
             pool,
             config,
@@ -73,6 +79,7 @@ impl AppBootstrap {
             account_state,
             risk_limits,
             book_ticker_cache,
+            runtime_state_repo,
         })
     }
 }

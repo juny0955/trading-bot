@@ -1,10 +1,13 @@
 use crate::domain::lifecycle::{ManagementCommand, PositionRuntimeState, PositionSnapshot};
+use crate::ports::outbound::runtime_state_repository::RuntimeStateRepository;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
+use tracing::warn;
 use uuid::Uuid;
 
 pub type PositionKey = (i64, String); // (strategy_instance_id, symbol)
@@ -62,38 +65,75 @@ pub struct TradeManager {
     triggers: RwLock<HashMap<PositionKey, TriggerState>>,
     /// 포지션별 entry ATR 캐시 (lifecycle open 시 저장, snapshot 빌드에 사용)
     entry_atrs: RwLock<HashMap<PositionKey, Decimal>>,
+    /// HWM DB flush 직전 마지막으로 저장한 값 (과도한 write 방지용)
+    last_flushed_hwm: RwLock<HashMap<PositionKey, Decimal>>,
+    repo: Arc<dyn RuntimeStateRepository>,
 }
 
 impl TradeManager {
-    /// 빈 상태의 `TradeManager`를 생성합니다.
-    pub fn new() -> Self {
+    pub fn new(repo: Arc<dyn RuntimeStateRepository>) -> Self {
         Self {
             states: RwLock::new(HashMap::new()),
             triggers: RwLock::new(HashMap::new()),
             entry_atrs: RwLock::new(HashMap::new()),
+            last_flushed_hwm: RwLock::new(HashMap::new()),
+            repo,
         }
     }
 
     // ── 상태 관리 ─────────────────────────────────────────────────────────────
 
-    /// 새 포지션 오픈 시 runtime state를 초기화합니다.
+    /// 새 포지션 오픈 시 runtime state를 초기화하고 DB에 저장합니다.
     pub async fn init_position(
         &self,
         key: PositionKey,
         state: PositionRuntimeState,
         entry_atr: Option<Decimal>,
     ) {
+        {
+            let mut states = self.states.write().await;
+            states.insert(key.clone(), state.clone());
+        }
+        if let Some(atr) = entry_atr {
+            self.entry_atrs.write().await.insert(key.clone(), atr);
+        }
+        let (instance_id, symbol) = &key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &state, entry_atr).await {
+            warn!(error = %e, symbol, "runtime state 초기화 DB flush 실패");
+        }
+    }
+
+    /// 재시작 시 DB에서 읽은 상태를 인메모리에 복원합니다 (DB flush 없음).
+    pub async fn restore_position(
+        &self,
+        key: PositionKey,
+        state: PositionRuntimeState,
+        entry_atr: Option<Decimal>,
+    ) {
+        if let Some(hwm) = state.high_water_mark {
+            self.last_flushed_hwm.write().await.insert(key.clone(), hwm);
+        }
         self.states.write().await.insert(key.clone(), state);
         if let Some(atr) = entry_atr {
             self.entry_atrs.write().await.insert(key, atr);
         }
     }
 
-    /// 포지션 종료 시 runtime state를 제거합니다.
+    /// 포지션 종료 시 runtime state를 제거하고 DB에서 삭제합니다.
     pub async fn remove_position(&self, key: &PositionKey) {
         self.states.write().await.remove(key);
         self.triggers.write().await.remove(key);
         self.entry_atrs.write().await.remove(key);
+        self.last_flushed_hwm.write().await.remove(key);
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.delete(*instance_id, symbol).await {
+            warn!(error = %e, symbol, "runtime state 삭제 DB flush 실패");
+        }
+    }
+
+    /// 해당 key의 포지션이 인메모리에 등록되어 있는지 확인합니다.
+    pub async fn has_position(&self, key: &PositionKey) -> bool {
+        self.states.read().await.contains_key(key)
     }
 
     /// lifecycle open 후 entry_atr을 설정합니다 (전략 ATR이 확정되면 호출).
@@ -106,71 +146,156 @@ impl TradeManager {
         self.entry_atrs.read().await.get(key).copied()
     }
 
-    /// PartialClose 주문 제출 후 pending_reduce_order_id를 설정합니다.
+    /// PartialClose 주문 제출 후 pending_reduce_order_id를 설정하고 DB에 저장합니다.
     pub async fn set_pending_reduce(&self, key: &PositionKey, order_id: Uuid) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.pending_reduce_order_id = Some(order_id);
-        }
-    }
-
-    /// PartialClose 주문 체결 후 tp_stage를 승격합니다.
-    pub async fn advance_tp_stage(&self, key: &PositionKey) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.tp_stage += 1;
-            s.pending_reduce_order_id = None;
-        }
-    }
-
-    /// SL 주문 체결 / 갱신 완료 후 호출합니다.
-    pub async fn set_sl_order(&self, key: &PositionKey, order_id: Option<Uuid>) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.sl_order_id = order_id;
-            if order_id.is_some() {
-                s.sl_replace_in_flight = false;
-                s.unprotected_since = None;
+        let snapshot = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                s.pending_reduce_order_id = Some(order_id);
+                s.clone()
+            } else {
+                return;
             }
+        };
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+            warn!(error = %e, symbol, "pending_reduce DB flush 실패");
         }
     }
 
-    /// SL cancel ACK 후 무보호 시작 시점을 기록합니다.
-    /// 기존 SL이 제거된 시점부터 무보호 타이머가 시작됩니다.
+    /// PartialClose 주문 체결 후 tp_stage를 승격하고 DB에 저장합니다.
+    pub async fn advance_tp_stage(&self, key: &PositionKey) {
+        let snapshot = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                s.tp_stage += 1;
+                s.pending_reduce_order_id = None;
+                s.clone()
+            } else {
+                return;
+            }
+        };
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+            warn!(error = %e, symbol, "tp_stage DB flush 실패");
+        }
+    }
+
+    /// SL 주문 체결 / 갱신 완료 후 호출하고 DB에 저장합니다.
+    pub async fn set_sl_order(&self, key: &PositionKey, order_id: Option<Uuid>) {
+        let snapshot = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                s.sl_order_id = order_id;
+                if order_id.is_some() {
+                    s.sl_replace_in_flight = false;
+                    s.unprotected_since = None;
+                }
+                s.clone()
+            } else {
+                return;
+            }
+        };
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+            warn!(error = %e, symbol, "sl_order DB flush 실패");
+        }
+    }
+
+    /// SL cancel ACK 후 무보호 시작 시점을 기록하고 DB에 저장합니다.
     pub async fn on_sl_cancelled(&self, key: &PositionKey) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.sl_order_id = None;
-            s.unprotected_since = Some(Utc::now());
+        let snapshot = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                s.sl_order_id = None;
+                s.unprotected_since = Some(Utc::now());
+                s.clone()
+            } else {
+                return;
+            }
+        };
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+            warn!(error = %e, symbol, "sl_cancelled DB flush 실패");
         }
     }
 
-    /// ReplaceSL 발행 시 desired_sl_price와 in_flight 상태를 설정합니다.
+    /// ReplaceSL 발행 시 desired_sl_price를 설정하고 DB에 저장합니다.
     pub async fn on_replace_sl_issued(&self, key: &PositionKey, desired_price: Decimal) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.sl_replace_in_flight = true;
-            s.desired_sl_price = Some(desired_price);
+        let snapshot = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                s.sl_replace_in_flight = true;
+                s.desired_sl_price = Some(desired_price);
+                s.clone()
+            } else {
+                return;
+            }
+        };
+        // sl_replace_in_flight은 DB 스키마에 없으므로 저장되지 않음 (재시작 시 false 리셋)
+        let (instance_id, symbol) = key;
+        if let Err(e) = self.repo.upsert(*instance_id, symbol, &snapshot, None).await {
+            warn!(error = %e, symbol, "replace_sl_issued DB flush 실패");
         }
     }
 
-    /// ReplaceSL cancel 실패 시 in_flight를 해제하고 다음 주기에 재시도합니다.
+    /// ReplaceSL cancel 실패 시 in_flight를 해제합니다 (DB flush 없음 — transient).
     pub async fn on_replace_sl_cancel_failed(&self, key: &PositionKey) {
         if let Some(s) = self.states.write().await.get_mut(key) {
             s.sl_replace_in_flight = false;
-            // desired_sl_price 유지 — 다음 주기에 재시도
         }
     }
 
-    /// SL 교체 재시도 횟수를 증가시킵니다 (로깅 전용).
+    /// SL 교체 재시도 횟수를 증가시킵니다 (로깅 전용, DB flush 없음).
     pub async fn increment_sl_retry(&self, key: &PositionKey) {
         if let Some(s) = self.states.write().await.get_mut(key) {
             s.sl_retry_count = s.sl_retry_count.saturating_add(1);
         }
     }
 
-    /// high_water_mark를 메모리에서 갱신합니다 (DB flush는 별도 주기).
+    /// high_water_mark를 갱신하고, 변화량이 임계값을 초과하면 DB에 flush합니다.
     pub async fn update_hwm(&self, key: &PositionKey, price: Decimal) {
-        if let Some(s) = self.states.write().await.get_mut(key) {
-            s.high_water_mark = Some(match s.high_water_mark {
-                Some(hwm) => hwm.max(price),
-                None => price,
-            });
+        let new_hwm = {
+            let mut states = self.states.write().await;
+            if let Some(s) = states.get_mut(key) {
+                let hwm = match s.high_water_mark {
+                    Some(hwm) => hwm.max(price),
+                    None => price,
+                };
+                s.high_water_mark = Some(hwm);
+                hwm
+            } else {
+                return;
+            }
+        };
+
+        let entry_atr = self.entry_atrs.read().await.get(key).copied();
+        let threshold = match entry_atr {
+            Some(atr) if !atr.is_zero() => atr * dec!(0.3),
+            _ if !new_hwm.is_zero() => new_hwm * dec!(0.001), // fallback: 0.1% of price
+            _ => return,
+        };
+
+        let last = self
+            .last_flushed_hwm
+            .read()
+            .await
+            .get(key)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
+
+        if new_hwm - last < threshold {
+            return;
+        }
+
+        let snapshot = self.states.read().await.get(key).cloned();
+        if let Some(state) = snapshot {
+            let (instance_id, symbol) = key;
+            if let Err(e) = self.repo.upsert(*instance_id, symbol, &state, entry_atr).await {
+                warn!(error = %e, symbol, "HWM DB flush 실패");
+            } else {
+                self.last_flushed_hwm.write().await.insert(key.clone(), new_hwm);
+            }
         }
     }
 
@@ -279,12 +404,6 @@ impl TradeManager {
         }
 
         commands
-    }
-}
-
-impl Default for TradeManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

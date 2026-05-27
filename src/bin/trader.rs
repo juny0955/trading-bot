@@ -29,7 +29,8 @@ use trading_bot::application::order_reconciler::OrderReconciler;
 use trading_bot::application::outbox_order_service::OutboxOrderService;
 use trading_bot::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use trading_bot::application::risk_controller::RiskController;
-use trading_bot::application::trade_manager::{TradeManager, TradeManagerParams};
+use trading_bot::application::trade_manager::{PositionKey, TradeManager, TradeManagerParams};
+use trading_bot::domain::lifecycle::PositionRuntimeState;
 use trading_bot::bootstrap::AppBootstrap;
 use trading_bot::domain::order::Fill;
 use trading_bot::domain::strategies::{Strategy, StrategyInstance, create_strategy};
@@ -143,7 +144,8 @@ async fn main() -> Result<()> {
 
     let decision_repo = Arc::new(PostgresDecisionRepository::new(boot.pool.clone()));
     let decision_logger = Arc::new(DecisionLogger::new(decision_repo));
-    let trade_manager = Arc::new(TradeManager::new());
+    let trade_manager = Arc::new(TradeManager::new(boot.runtime_state_repo.clone()));
+    recover_runtime_states(&boot, &trade_manager, &instances).await;
     let limit_monitor = Arc::new(LimitOrderMonitor::new());
 
     let handler = Arc::new(AccountEventHandler::new(
@@ -276,6 +278,66 @@ async fn sync_state(
             info!("계정 동기화 완료");
         }
         Err(e) => warn!(error = %e, "계정 동기화 실패 — 계속 진행"),
+    }
+}
+
+/// 재시작 시 DB에 저장된 PositionRuntimeState를 TradeManager에 복원합니다.
+async fn recover_runtime_states(
+    boot: &AppBootstrap,
+    trade_manager: &TradeManager,
+    instances: &[StrategyInstance],
+) {
+    // 현재 열린 포지션 키 수집 (account_bootstrap이 이미 DB와 exchange를 동기화했으므로 신뢰 가능)
+    let mut open_keys: std::collections::HashSet<PositionKey> = std::collections::HashSet::new();
+    for inst in instances {
+        for symbol in &inst.symbols {
+            match boot.position_repo.get(inst.id, symbol).await {
+                Ok(Some(sp)) if !sp.position.qty.is_zero() => {
+                    open_keys.insert((inst.id, symbol.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let saved = match boot.runtime_state_repo.load_all().await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, "runtime state 로드 실패 — 복구 건너뜀");
+            return;
+        }
+    };
+
+    for (instance_id, symbol, state, entry_atr) in saved {
+        let key: PositionKey = (instance_id, symbol.clone());
+        if open_keys.contains(&key) {
+            trade_manager
+                .restore_position(key, state, entry_atr)
+                .await;
+            info!(instance_id, %symbol, "runtime state 복원 완료");
+        } else {
+            // 포지션이 이미 닫혔으면 stale record 정리
+            if let Err(e) = boot
+                .runtime_state_repo
+                .delete(instance_id, &symbol)
+                .await
+            {
+                warn!(error = %e, instance_id, %symbol, "stale runtime state 삭제 실패");
+            } else {
+                warn!(instance_id, %symbol, "stale runtime state 삭제 완료");
+            }
+        }
+    }
+
+    // 열린 포지션이 있는데 runtime state가 없는 경우 기본값으로 초기화 (graceful fallback)
+    for key in &open_keys {
+        if !trade_manager.has_position(key).await {
+            let (instance_id, symbol) = key;
+            warn!(instance_id, %symbol, "runtime state 없음 — 기본값으로 초기화");
+            trade_manager
+                .init_position(key.clone(), PositionRuntimeState::default(), None)
+                .await;
+        }
     }
 }
 
