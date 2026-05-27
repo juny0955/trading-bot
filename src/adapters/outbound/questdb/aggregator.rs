@@ -96,10 +96,14 @@ impl OrderbookAcc {
             _ => return,
         };
 
-        let bid_total: f64 = self.bid.iter()
+        let bid_total: f64 = self
+            .bid
+            .iter()
             .filter_map(|s| s.and_then(|(_, q)| q.to_f64()))
             .sum();
-        let ask_total: f64 = self.ask.iter()
+        let ask_total: f64 = self
+            .ask
+            .iter()
             .filter_map(|s| s.and_then(|(_, q)| q.to_f64()))
             .sum();
         let imbalance = if bid_total + ask_total > 0.0 {
@@ -127,16 +131,15 @@ impl OrderbookAcc {
         let imbalance_var = (self.imbalance_sum_sq / n) - (imbalance_avg * imbalance_avg);
         let imbalance_std = imbalance_var.max(0.0).sqrt();
 
-        let to_dec =
-            |v: f64| Decimal::try_from(v).unwrap_or(Decimal::ZERO);
+        let to_dec = |v: f64| Decimal::try_from(v).unwrap_or(Decimal::ZERO);
 
         let row = buf.table("orderbook_features_1m")?;
         row.symbol("symbol", symbol)?;
 
         const BID_P: [&str; 3] = ["bid1_price", "bid2_price", "bid3_price"];
-        const BID_Q: [&str; 3] = ["bid1_qty",   "bid2_qty",   "bid3_qty"  ];
+        const BID_Q: [&str; 3] = ["bid1_qty", "bid2_qty", "bid3_qty"];
         const ASK_P: [&str; 3] = ["ask1_price", "ask2_price", "ask3_price"];
-        const ASK_Q: [&str; 3] = ["ask1_qty",   "ask2_qty",   "ask3_qty"  ];
+        const ASK_Q: [&str; 3] = ["ask1_qty", "ask2_qty", "ask3_qty"];
 
         for i in 0..3 {
             if let Some((p, q)) = self.bid[i] {
@@ -147,8 +150,8 @@ impl OrderbookAcc {
             }
         }
 
-        row.column_dec("spread_avg",    &to_dec(spread_avg))?
-            .column_dec("spread_max",    &to_dec(self.spread_max))?
+        row.column_dec("spread_avg", &to_dec(spread_avg))?
+            .column_dec("spread_max", &to_dec(self.spread_max))?
             .column_dec("imbalance_avg", &to_dec(imbalance_avg))?
             .column_dec("imbalance_std", &to_dec(imbalance_std))?
             .at(TimestampNanos::new(ts_ns))?;
@@ -308,7 +311,7 @@ mod tests {
     fn trade_acc_buy_sell_split() {
         let mut acc = TradeAcc::default();
         acc.update(&make_trade("BTCUSDT", dec!(100), dec!(2), false, 0)); // taker buy
-        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0));  // taker sell
+        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0)); // taker sell
         assert_eq!(acc.buy_volume, dec!(2));
         assert_eq!(acc.sell_volume, dec!(1));
         assert_eq!(acc.trade_count, 2);

@@ -144,12 +144,12 @@ fn flush_if_any(sender: &mut Sender, buf: &mut Buffer, rows: &mut usize, url: &s
 
 fn event_time_ns(event: &MarketDataEvent) -> i64 {
     match event {
-        MarketDataEvent::Trade(d)      => d.time_ns,
-        MarketDataEvent::Depth(d)      => d.event_time_ns,
+        MarketDataEvent::Trade(d) => d.time_ns,
+        MarketDataEvent::Depth(d) => d.event_time_ns,
         MarketDataEvent::BookTicker(d) => d.event_time_ns,
-        MarketDataEvent::Kline(d)      => d.event_time_ns,
-        MarketDataEvent::MarkPrice(d)  => d.event_time_ns,
-        MarketDataEvent::FearGreed(d)  => d.timestamp_sec * 1_000_000_000,
+        MarketDataEvent::Kline(d) => d.event_time_ns,
+        MarketDataEvent::MarkPrice(d) => d.event_time_ns,
+        MarketDataEvent::FearGreed(d) => d.timestamp_sec * 1_000_000_000,
     }
 }
 
