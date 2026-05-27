@@ -22,4 +22,10 @@ pub trait PositionRepository: Send + Sync {
         instance_id: i64,
         snap: &ExchangePositionSnapshot,
     ) -> Result<(), RepositoryError>;
+    /// 포지션을 flat(qty=0)으로 정정합니다.
+    ///
+    /// `fetch_positions()`는 flat 포지션을 목록에서 제외하므로 `upsert_from_snapshot`만으로는
+    /// "거래소엔 없는데 DB엔 남아 있는" 유령 포지션을 청소할 수 없습니다. 이 메서드로 qty를
+    /// 0으로 만들면 `get()`이 flat(side `None`)으로 매핑합니다.
+    async fn mark_flat(&self, instance_id: i64, symbol: &str) -> Result<(), RepositoryError>;
 }

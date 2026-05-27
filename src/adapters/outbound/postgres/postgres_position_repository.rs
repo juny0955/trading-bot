@@ -195,4 +195,18 @@ impl PositionRepository for PostgresPositionRepository {
         .await?;
         Ok(())
     }
+
+    async fn mark_flat(&self, instance_id: i64, symbol: &str) -> Result<(), RepositoryError> {
+        sqlx::query(
+            r#"
+            UPDATE positions SET qty = 0, updated_at = NOW()
+            WHERE strategy_instance_id = $1 AND symbol = $2
+            "#,
+        )
+        .bind(instance_id)
+        .bind(symbol)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
