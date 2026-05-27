@@ -11,9 +11,10 @@ use crate::domain::lifecycle::{
     PositionRuntimeState, PositionSnapshot,
 };
 use crate::domain::market_data::{BookTicker, Depth, Kline};
-use crate::domain::order::{OrderRequest, OrderSide, OrderType};
+use crate::domain::order::{OrderError, OrderRequest, OrderSide, OrderType};
 use crate::domain::position::Position;
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
+use crate::ports::account_source::AccountSource;
 use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::order_service::OrderService;
 use crate::ports::position_repository::PositionRepository;
@@ -33,6 +34,7 @@ use uuid::Uuid;
 pub struct LiveTrader {
     order_svc: Arc<dyn OrderService>,
     position_repo: Arc<dyn PositionRepository>,
+    account_src: Arc<dyn AccountSource>,
     book_ticker_cache: Arc<BookTickerCache>,
     account_state: Arc<AccountState>,
     trade_manager: Arc<TradeManager>,
@@ -47,6 +49,7 @@ impl LiveTrader {
     pub fn new(
         order_svc: Arc<dyn OrderService>,
         position_repo: Arc<dyn PositionRepository>,
+        account_src: Arc<dyn AccountSource>,
         book_ticker_cache: Arc<BookTickerCache>,
         account_state: Arc<AccountState>,
         trade_manager: Arc<TradeManager>,
@@ -58,6 +61,7 @@ impl LiveTrader {
         Self {
             order_svc,
             position_repo,
+            account_src,
             book_ticker_cache,
             account_state,
             trade_manager,
@@ -490,6 +494,9 @@ impl LiveTrader {
                     }
                     Err(e) => {
                         error!(error = %e, symbol, "부분 익절 실패");
+                        if is_reduce_only_reject(&e) {
+                            self.reconcile_after_reduce_reject(key).await;
+                        }
                         reject_decision(&self.decision_logger, decision_id, &e.to_string()).await;
                     }
                 }
@@ -534,7 +541,11 @@ impl LiveTrader {
                             }
                             Err(e) => {
                                 error!(error = %e, symbol, "새 SL 주문 실패");
-                                self.trade_manager.increment_sl_retry(key).await;
+                                if is_reduce_only_reject(&e) {
+                                    self.reconcile_after_reduce_reject(key).await;
+                                } else {
+                                    self.trade_manager.increment_sl_retry(key).await;
+                                }
                                 reject_decision(&self.decision_logger, decision_id, &e.to_string())
                                     .await;
                             }
@@ -596,8 +607,37 @@ impl LiveTrader {
             }
             Err(e) => {
                 error!(error = %e, symbol, "강제 청산 실패");
+                if is_reduce_only_reject(&e) {
+                    self.reconcile_after_reduce_reject(key).await;
+                }
                 reject_decision(&self.decision_logger, decision_id, &e.to_string()).await;
             }
+        }
+    }
+
+    /// reduceOnly 주문이 -2022(ReduceOnly rejected)로 거부된 뒤, 거래소 실제 포지션을
+    /// 재조회해 DB를 정정한다. 거래소에 포지션이 남아 있으면 실제 수량으로 덮어쓰고,
+    /// flat이면 DB를 flat 처리하고 TradeManager에서 제거해 무한 재시도 루프를 끊는다.
+    async fn reconcile_after_reduce_reject(&self, key: &PositionKey) {
+        let (instance_id, symbol) = key;
+        match self.account_src.fetch_positions().await {
+            Ok(positions) => {
+                if let Some(snap) = positions.iter().find(|p| p.symbol == *symbol) {
+                    match self.position_repo.upsert_from_snapshot(*instance_id, snap).await {
+                        Ok(()) => {
+                            info!(symbol, qty = %snap.qty, "reduceOnly 거부 → 거래소 포지션으로 DB 정정")
+                        }
+                        Err(e) => warn!(error = %e, symbol, "reduceOnly 거부 후 포지션 동기화 실패"),
+                    }
+                } else {
+                    if let Err(e) = self.position_repo.mark_flat(*instance_id, symbol).await {
+                        warn!(error = %e, symbol, "reduceOnly 거부 후 flat 처리 실패");
+                    }
+                    self.trade_manager.remove_position(key).await;
+                    warn!(symbol, "reduceOnly 거부 → 거래소 포지션 없음, DB flat 처리 및 관리 중단");
+                }
+            }
+            Err(e) => warn!(error = %e, symbol, "reduceOnly 거부 후 거래소 포지션 조회 실패"),
         }
     }
 
@@ -628,6 +668,12 @@ impl LiveTrader {
 }
 
 // ── 헬퍼 함수 ─────────────────────────────────────────────────────────────────
+
+/// Binance -2022 "ReduceOnly Order is rejected" 거부인지 판별한다.
+/// 줄일 포지션이 없어 reduceOnly가 거부된 경우로, 포지션 재동기화가 필요하다.
+fn is_reduce_only_reject(e: &OrderError) -> bool {
+    matches!(e, OrderError::ExchangeRejected { code: -2022, .. })
+}
 
 fn event_symbol(e: &MarketDataEvent) -> String {
     match e {

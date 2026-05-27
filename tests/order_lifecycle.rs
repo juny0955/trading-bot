@@ -299,6 +299,17 @@ impl PositionRepository for FakePositionRepo {
         }
         Ok(())
     }
+
+    async fn mark_flat(&self, instance_id: i64, symbol: &str) -> Result<(), RepositoryError> {
+        let mut positions = self.positions.lock().unwrap();
+        if let Some(existing) = positions
+            .iter_mut()
+            .find(|p| p.strategy_instance_id == instance_id && p.symbol == symbol)
+        {
+            existing.position = StoredPosition::flat(instance_id, symbol.to_string()).position;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]

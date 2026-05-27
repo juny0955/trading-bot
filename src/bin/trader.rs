@@ -160,6 +160,7 @@ async fn main() -> Result<()> {
     let trader = Box::new(LiveTrader::new(
         order_svc.clone(),
         boot.position_repo.clone(),
+        account_client.clone(),
         boot.book_ticker_cache.clone(),
         boot.account_state.clone(),
         trade_manager,
