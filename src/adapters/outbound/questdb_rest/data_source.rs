@@ -110,7 +110,7 @@ fn bars_sql(q: &BarQuery) -> String {
     format!(
         "SELECT timestamp, first(price) o, max(price) h, min(price) l, \
         last(price) c, sum(quantity) v \
-        FROM trades \
+        FROM raw_trade \
         WHERE symbol = '{sym}' AND timestamp >= '{from}' AND timestamp < '{to}' \
         SAMPLE BY {interval} ALIGN TO CALENDAR",
         sym = escape_sql_literal(&q.symbol),
@@ -124,7 +124,7 @@ fn depth_sql(q: &DepthQuery) -> String {
     format!(
         "SELECT timestamp, first(bid1_price) bp, first(bid1_qty) bq, \
         first(ask1_price) ap, first(ask1_qty) aq \
-        FROM depth \
+        FROM orderbook_features_1m \
         WHERE symbol = '{sym}' AND timestamp >= '{from}' AND timestamp < '{to}' \
         SAMPLE BY {every} ALIGN TO CALENDAR",
         sym = escape_sql_literal(&q.symbol),
