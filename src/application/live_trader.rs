@@ -623,18 +623,27 @@ impl LiveTrader {
         match self.account_src.fetch_positions().await {
             Ok(positions) => {
                 if let Some(snap) = positions.iter().find(|p| p.symbol == *symbol) {
-                    match self.position_repo.upsert_from_snapshot(*instance_id, snap).await {
+                    match self
+                        .position_repo
+                        .upsert_from_snapshot(*instance_id, snap)
+                        .await
+                    {
                         Ok(()) => {
                             info!(symbol, qty = %snap.qty, "reduceOnly 거부 → 거래소 포지션으로 DB 정정")
                         }
-                        Err(e) => warn!(error = %e, symbol, "reduceOnly 거부 후 포지션 동기화 실패"),
+                        Err(e) => {
+                            warn!(error = %e, symbol, "reduceOnly 거부 후 포지션 동기화 실패")
+                        }
                     }
                 } else {
                     if let Err(e) = self.position_repo.mark_flat(*instance_id, symbol).await {
                         warn!(error = %e, symbol, "reduceOnly 거부 후 flat 처리 실패");
                     }
                     self.trade_manager.remove_position(key).await;
-                    warn!(symbol, "reduceOnly 거부 → 거래소 포지션 없음, DB flat 처리 및 관리 중단");
+                    warn!(
+                        symbol,
+                        "reduceOnly 거부 → 거래소 포지션 없음, DB flat 처리 및 관리 중단"
+                    );
                 }
             }
             Err(e) => warn!(error = %e, symbol, "reduceOnly 거부 후 거래소 포지션 조회 실패"),

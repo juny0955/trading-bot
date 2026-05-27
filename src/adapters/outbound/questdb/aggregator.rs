@@ -100,12 +100,8 @@ impl OrderbookAcc {
             return;
         }
 
-        let bid_total: f64 = self.bid.iter()
-            .filter_map(|s| s.map(|(_, q)| d(&q)))
-            .sum();
-        let ask_total: f64 = self.ask.iter()
-            .filter_map(|s| s.map(|(_, q)| d(&q)))
-            .sum();
+        let bid_total: f64 = self.bid.iter().filter_map(|s| s.map(|(_, q)| d(&q))).sum();
+        let ask_total: f64 = self.ask.iter().filter_map(|s| s.map(|(_, q)| d(&q))).sum();
         let imbalance = if bid_total + ask_total > 0.0 {
             bid_total / (bid_total + ask_total)
         } else {
@@ -132,24 +128,26 @@ impl OrderbookAcc {
         let imbalance_std = imbalance_var.max(0.0).sqrt();
 
         const BID_P: [&str; 3] = ["bid1_price", "bid2_price", "bid3_price"];
-        const BID_Q: [&str; 3] = ["bid1_qty",   "bid2_qty",   "bid3_qty"  ];
+        const BID_Q: [&str; 3] = ["bid1_qty", "bid2_qty", "bid3_qty"];
         const ASK_P: [&str; 3] = ["ask1_price", "ask2_price", "ask3_price"];
-        const ASK_Q: [&str; 3] = ["ask1_qty",   "ask2_qty",   "ask3_qty"  ];
+        const ASK_Q: [&str; 3] = ["ask1_qty", "ask2_qty", "ask3_qty"];
 
         let row = buf.table("orderbook_features_1m")?;
         row.symbol("symbol", symbol)?;
 
         for i in 0..3 {
             if let Some((p, q)) = self.bid[i] {
-                row.column_f64(BID_P[i], d(&p))?.column_f64(BID_Q[i], d(&q))?;
+                row.column_f64(BID_P[i], d(&p))?
+                    .column_f64(BID_Q[i], d(&q))?;
             }
             if let Some((p, q)) = self.ask[i] {
-                row.column_f64(ASK_P[i], d(&p))?.column_f64(ASK_Q[i], d(&q))?;
+                row.column_f64(ASK_P[i], d(&p))?
+                    .column_f64(ASK_Q[i], d(&q))?;
             }
         }
 
-        row.column_f64("spread_avg",    spread_avg)?
-            .column_f64("spread_max",    self.spread_max)?
+        row.column_f64("spread_avg", spread_avg)?
+            .column_f64("spread_max", self.spread_max)?
             .column_f64("imbalance_avg", imbalance_avg)?
             .column_f64("imbalance_std", imbalance_std)?
             .at(TimestampNanos::new(ts_ns))?;
@@ -182,8 +180,8 @@ impl MarkPriceState {
     fn flush(&self, buf: &mut Buffer, symbol: &str, ts_ns: i64) -> questdb::Result<()> {
         buf.table("mark_price_1m")?
             .symbol("symbol", symbol)?
-            .column_f64("mark_price",   d(&self.mark_price))?
-            .column_f64("index_price",  d(&self.index_price))?
+            .column_f64("mark_price", d(&self.mark_price))?
+            .column_f64("index_price", d(&self.index_price))?
             .column_f64("funding_rate", d(&self.funding_rate))?
             .column_i64("next_funding_time", self.next_funding_time_ms)?
             .at(TimestampNanos::new(ts_ns))?;
@@ -309,7 +307,7 @@ mod tests {
     fn trade_acc_buy_sell_split() {
         let mut acc = TradeAcc::default();
         acc.update(&make_trade("BTCUSDT", dec!(100), dec!(2), false, 0)); // taker buy
-        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0));  // taker sell
+        acc.update(&make_trade("BTCUSDT", dec!(100), dec!(1), true, 0)); // taker sell
         assert_eq!(acc.buy_volume, dec!(2));
         assert_eq!(acc.sell_volume, dec!(1));
         assert_eq!(acc.trade_count, 2);
