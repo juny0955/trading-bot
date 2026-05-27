@@ -98,6 +98,12 @@ async fn sync_positions(
                 } else {
                     info!(instance_id = inst.id, %symbol, qty = %snap.qty, "거래소 포지션 동기화");
                 }
+            } else {
+                // 거래소에 포지션이 없으면(fetch_positions가 flat을 제외) DB의 유령 포지션을
+                // flat 처리한다. 그래야 재시작 후에도 reduceOnly -2022 루프가 재개되지 않는다.
+                if let Err(e) = position_repo.mark_flat(inst.id, symbol).await {
+                    warn!(instance_id = inst.id, %symbol, error = %e, "유령 포지션 flat 처리 실패");
+                }
             }
         }
     }
