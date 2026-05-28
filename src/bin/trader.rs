@@ -20,6 +20,7 @@ use trading_bot::adapters::outbound::telegram::notifier::TelegramNotifier;
 use trading_bot::application::account_bootstrap;
 use trading_bot::application::account_event_handler::AccountEventHandler;
 use trading_bot::application::account_state_refresher::AccountStateRefresher;
+use trading_bot::application::circuit_breaker_controller::CircuitBreakerController;
 use trading_bot::application::daily_reporter::DailyReporter;
 use trading_bot::application::decision_logger::DecisionLogger;
 use trading_bot::application::exchange_info_refresher::ExchangeInfoRefresher;
@@ -110,9 +111,15 @@ async fn main() -> Result<()> {
         boot.position_repo.clone(),
         boot.book_ticker_cache.clone(),
     ));
+    let circuit_breaker = Arc::new(CircuitBreakerController::new(boot.risk_limits.clone()));
     let order_svc: Arc<dyn OrderService> = Arc::new(
-        OutboxOrderService::new(executor.clone(), repo.clone(), risk)
-            .with_dry_run(boot.config.runtime.trading.dry_run),
+        OutboxOrderService::new(
+            executor.clone(),
+            repo.clone(),
+            risk,
+            circuit_breaker.clone(),
+        )
+        .with_dry_run(boot.config.runtime.trading.dry_run),
     );
 
     let strategies = build_strategies(&instances)?;
@@ -163,6 +170,7 @@ async fn main() -> Result<()> {
         account_client.clone(),
         boot.book_ticker_cache.clone(),
         boot.account_state.clone(),
+        circuit_breaker,
         trade_manager,
         lifecycle_tracker,
         decision_logger,

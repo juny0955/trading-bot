@@ -1,4 +1,5 @@
 use crate::adapters::binance::api::BinanceOrderApi;
+use crate::adapters::binance::rate_limit::{parse_retry_after, parse_used_weight};
 use crate::adapters::binance::signing;
 use crate::domain::account::{AccountError, AccountSnapshot, ExchangePositionSnapshot};
 use crate::domain::order::OrderSide;
@@ -24,6 +25,8 @@ impl BinanceAccountClient {
     }
 
     async fn signed_post(&self, path: &str, params: &str) -> Result<Value, AccountError> {
+        self.api.rate_limit.await_capacity().await;
+
         let (_body, url) =
             build_post_body_and_url(&self.api.secret, &self.api.rest_base, path, params)?;
         let resp = self
@@ -35,6 +38,21 @@ impl BinanceAccountClient {
             .await
             .map_err(|e| AccountError::Network(e.to_string()))?;
         let status = resp.status();
+        let headers = resp.headers().clone();
+        self.api
+            .rate_limit
+            .record_used_weight(parse_used_weight(&headers));
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = parse_retry_after(&headers);
+            self.api.rate_limit.record_429(retry_after);
+            return Err(AccountError::RateLimited);
+        }
+        if status.as_u16() == 418 {
+            self.api
+                .rate_limit
+                .record_429(Some(Duration::from_secs(300)));
+            return Err(AccountError::IpBanned);
+        }
         let val: Value = resp
             .json()
             .await
@@ -50,6 +68,8 @@ impl BinanceAccountClient {
     }
 
     async fn signed_get(&self, path: &str) -> Result<Value, AccountError> {
+        self.api.rate_limit.await_capacity().await;
+
         let url = build_get_url(&self.api.secret, &self.api.rest_base, path)?;
         let resp = self
             .api
@@ -60,10 +80,19 @@ impl BinanceAccountClient {
             .await
             .map_err(|e| AccountError::Network(e.to_string()))?;
         let status = resp.status();
+        let headers = resp.headers().clone();
+        self.api
+            .rate_limit
+            .record_used_weight(parse_used_weight(&headers));
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let retry_after = parse_retry_after(&headers);
+            self.api.rate_limit.record_429(retry_after);
             return Err(AccountError::RateLimited);
         }
         if status.as_u16() == 418 {
+            self.api
+                .rate_limit
+                .record_429(Some(Duration::from_secs(300)));
             return Err(AccountError::IpBanned);
         }
         let resp = resp
@@ -85,10 +114,10 @@ impl BinanceAccountClient {
                     warn!(path, attempt, "IP 밴(418) — 재시도 중단, 수분 대기 필요");
                     return Err(e);
                 }
-                // 요청 초과(429): 60초 대기 후 한 번만 재시도
+                // 요청 초과(429): Retry-After 기반 cooldown 후 한 번만 재시도
                 Err(AccountError::RateLimited) if attempt == 0 => {
-                    warn!(path, "요청 초과(429) — 60초 대기");
-                    sleep(Duration::from_secs(60)).await;
+                    warn!(path, "요청 초과(429) - Retry-After 대기");
+                    self.api.rate_limit.await_capacity().await;
                     last = Some(AccountError::RateLimited);
                 }
                 Err(AccountError::RateLimited) => {
@@ -284,5 +313,19 @@ mod tests {
         // 수량은 절댓값
         assert_eq!(snap.qty, dec!(2.0));
         Ok(())
+    }
+
+    #[test]
+    fn rate_limit_helpers_integrate_with_tracker() {
+        use crate::adapters::binance::rate_limit::RateLimitTracker;
+        use reqwest::header::{HeaderMap, HeaderValue};
+
+        let tracker = RateLimitTracker::with_limit(100);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-mbx-used-weight-1m", HeaderValue::from_static("50"));
+        tracker.record_used_weight(parse_used_weight(&headers));
+
+        headers.insert(reqwest::header::RETRY_AFTER, HeaderValue::from_static("45"));
+        assert_eq!(parse_retry_after(&headers), Some(Duration::from_secs(45)));
     }
 }

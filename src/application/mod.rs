@@ -3,6 +3,7 @@ pub mod account_event_handler;
 pub mod account_state;
 pub mod account_state_refresher;
 pub mod backtest;
+pub mod circuit_breaker_controller;
 pub mod daily_reporter;
 pub mod decision_logger;
 pub mod exchange_info_refresher;

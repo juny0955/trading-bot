@@ -1,4 +1,6 @@
+use crate::application::circuit_breaker_controller::CircuitBreakerController;
 use crate::application::risk_controller::{RiskController, RiskError};
+use crate::domain::circuit_breaker::CircuitScope;
 use crate::domain::order::{ExchangeOpenOrder, Order, OrderError, OrderRequest, OrderStatus};
 use crate::ports::outbound::order_executor::OrderExecutor;
 use crate::ports::outbound::order_repository::OrderRepository;
@@ -25,6 +27,7 @@ pub struct OutboxOrderService {
     executor: Arc<dyn OrderExecutor>,
     repo: Arc<dyn OrderRepository>,
     risk: Arc<RiskController>,
+    circuit_breaker: Arc<CircuitBreakerController>,
     dry_run: bool,
 }
 
@@ -34,11 +37,13 @@ impl OutboxOrderService {
         executor: Arc<dyn OrderExecutor>,
         repo: Arc<dyn OrderRepository>,
         risk: Arc<RiskController>,
+        circuit_breaker: Arc<CircuitBreakerController>,
     ) -> Self {
         Self {
             executor,
             repo,
             risk,
+            circuit_breaker,
             dry_run: false,
         }
     }
@@ -58,6 +63,14 @@ impl OrderService for OutboxOrderService {
     /// - 명확한 거부(InsufficientMargin 등): `Rejected`로 확정
     /// - 모호한 실패(네트워크 등): `PendingSubmit` 유지 → Reconciler가 정정
     async fn submit(&self, request: OrderRequest) -> Result<Order, OrderError> {
+        if let Err(t) = self.circuit_breaker.gate(&request.symbol) {
+            return Err(OrderError::CircuitOpen {
+                scope: t.scope,
+                reason: t.reason,
+                retry_after_sec: t.retry_after_sec,
+            });
+        }
+
         let request = self.risk.check(&request).await.map_err(OrderError::from)?;
 
         let (pending, req) = create_pending_order(request)?;
@@ -77,6 +90,9 @@ impl OrderService for OutboxOrderService {
 
         match self.executor.submit(req).await {
             Ok(mut ack) => {
+                self.circuit_breaker
+                    .record_success(CircuitScope::Symbol(ack.symbol.clone()));
+                self.circuit_breaker.record_success(CircuitScope::Global);
                 ack.id = pending.id;
                 ack.client_order_id = pending.client_order_id.clone();
                 ack.status = OrderStatus::New;
@@ -84,6 +100,9 @@ impl OrderService for OutboxOrderService {
                 Ok(ack)
             }
             Err(e) if is_definitive_rejection(&e) => {
+                self.circuit_breaker
+                    .record_failure(CircuitScope::Symbol(pending.symbol.clone()));
+                self.circuit_breaker.record_failure(CircuitScope::Global);
                 let rejected = Order {
                     status: OrderStatus::Rejected,
                     ..pending.clone()
@@ -92,6 +111,9 @@ impl OrderService for OutboxOrderService {
                 Err(e)
             }
             Err(e) => {
+                self.circuit_breaker
+                    .record_failure(CircuitScope::Symbol(pending.symbol.clone()));
+                self.circuit_breaker.record_failure(CircuitScope::Global);
                 warn!(
                     client_order_id = %pending.client_order_id,
                     error = %e,

@@ -47,6 +47,13 @@ fn apply(limits: &mut RiskLimits, key: &str, value: &str) {
         "order_ttl_sec" => parse_into(value, &mut limits.order_ttl_sec),
         "min_available_balance" => parse_decimal(value, &mut limits.min_available_balance),
         "slippage_buffer_bps" => parse_into(value, &mut limits.slippage_buffer_bps),
+        "cb_consecutive_failure_threshold" => {
+            parse_into(value, &mut limits.cb_consecutive_failure_threshold)
+        }
+        "cb_failure_window_sec" => parse_into(value, &mut limits.cb_failure_window_sec),
+        "cb_open_duration_sec" => parse_into(value, &mut limits.cb_open_duration_sec),
+        "cb_drawdown_pct" => parse_decimal(value, &mut limits.cb_drawdown_pct),
+        "cb_drawdown_lookback_sec" => parse_into(value, &mut limits.cb_drawdown_lookback_sec),
         _ => {}
     }
 }

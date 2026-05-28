@@ -1,8 +1,23 @@
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+
+fn rand_u64() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let prev = SEED.load(Ordering::Relaxed);
+    let next = prev.wrapping_mul(6364136223846793005).wrapping_add(now | 1);
+    SEED.store(next, Ordering::Relaxed);
+    next
+}
 
 /// WebSocket 세션 실행 결과의 재연결 정책을 표현합니다.
 ///
@@ -18,6 +33,8 @@ use tracing::{error, info, warn};
 pub enum WsError {
     #[error("retryable: {0:#}")]
     Retryable(#[source] anyhow::Error),
+    #[error("rate_limited (retry_after: {retry_after:?})")]
+    RateLimited { retry_after: Option<Duration> },
     #[error("fatal: {0:#}")]
     Fatal(#[source] anyhow::Error),
 }
@@ -67,6 +84,7 @@ pub struct ReconnectConfig {
     pub initial_delay: Duration,
     pub max_delay: Duration,
     pub backoff_multiplier: f64,
+    pub rate_limited_initial_delay: Duration,
     pub max_retries: Option<u32>, // None=무한, Some(N)=상한
 }
 
@@ -87,6 +105,7 @@ impl ReconnectConfig {
             initial_delay: Duration::from_secs(1),
             max_delay: Duration::from_secs(60),
             backoff_multiplier: 2.0,
+            rate_limited_initial_delay: Duration::from_secs(5),
             max_retries: None,
         }
     }
@@ -148,6 +167,28 @@ pub async fn run_with_reconnect<S: WsSession>(
                     session.on_disconnect().await;
                     return;
                 }
+                Err(WsError::RateLimited { retry_after }) => {
+                    session.on_disconnect().await;
+                    attempt += 1;
+                    if let Some(limit) = cfg.max_retries && attempt > limit {
+                        error!(label = %cfg.label, attempt = %attempt, limit = %limit, "재시도 초과 (RateLimited)");
+                        return;
+                    }
+
+                    let base = retry_after.unwrap_or(cfg.rate_limited_initial_delay);
+                    let jittered = crate::adapters::binance::ws::jitter::decorrelated_jitter(
+                        base,
+                        cfg.rate_limited_initial_delay,
+                        cfg.max_delay,
+                        |lo, hi| lo + (rand_u64() % (hi - lo).max(1)),
+                    );
+                    warn!(label = %cfg.label, delay_ms = jittered.as_millis() as u64, "RateLimited - 재연결 예정");
+                    tokio::select! {
+                        _ = token.cancelled() => return,
+                        _ = sleep(jittered) => {}
+                    }
+                    delay = cfg.initial_delay;
+                }
                 Err(WsError::Retryable(e)) => {
                     session.on_disconnect().await;
                     attempt += 1;
@@ -156,15 +197,68 @@ pub async fn run_with_reconnect<S: WsSession>(
                         return;
                     }
 
-                    warn!(label = %cfg.label, error = %e, delay_sec = delay.as_secs(), "재연결 예정");
+                    let jittered = crate::adapters::binance::ws::jitter::decorrelated_jitter(
+                        delay,
+                        cfg.initial_delay,
+                        cfg.max_delay,
+                        |lo, hi| lo + (rand_u64() % (hi - lo).max(1)),
+                    );
+                    warn!(label = %cfg.label, error = %e, delay_ms = jittered.as_millis() as u64, "재연결 예정");
                     tokio::select! {
                         _ = token.cancelled() => return,
-                        _ = sleep(delay) => {}
+                        _ = sleep(jittered) => {}
                     }
-                    let next = delay.mul_f64(cfg.backoff_multiplier);
+                    let next = jittered.mul_f64(cfg.backoff_multiplier);
                     delay = if next > cfg.max_delay { cfg.max_delay } else { next };
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct CountSession {
+        calls: Arc<AtomicU32>,
+        fail_n: u32,
+    }
+
+    #[async_trait]
+    impl WsSession for CountSession {
+        async fn run_once(&mut self, _token: CancellationToken) -> Result<(), WsError> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            if n < self.fail_n {
+                Err(WsError::RateLimited {
+                    retry_after: Some(Duration::from_millis(1)),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limited_uses_retry_after_and_resumes() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let session = CountSession {
+            calls: calls.clone(),
+            fail_n: 2,
+        };
+        let cfg = ReconnectConfig {
+            label: "test".into(),
+            initial_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(10),
+            backoff_multiplier: 2.0,
+            rate_limited_initial_delay: Duration::from_millis(1),
+            max_retries: Some(5),
+        };
+
+        run_with_reconnect(session, cfg, CancellationToken::new()).await;
+
+        assert!(calls.load(Ordering::SeqCst) >= 3);
     }
 }

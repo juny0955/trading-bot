@@ -323,6 +323,12 @@ pub enum OrderError {
     ConnectionLost(String),
     #[error("타임아웃")]
     Timeout,
+    #[error("회로 차단: scope={scope} reason={reason} retry_after_sec={retry_after_sec}")]
+    CircuitOpen {
+        scope: String,
+        reason: String,
+        retry_after_sec: u64,
+    },
     #[error("내부 오류: {0:#}")]
     Internal(#[source] anyhow::Error),
 }

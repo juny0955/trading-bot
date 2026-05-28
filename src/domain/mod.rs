@@ -1,5 +1,6 @@
 pub mod account;
 pub mod backtest;
+pub mod circuit_breaker;
 pub mod event;
 pub mod exchange_info;
 pub mod lifecycle;

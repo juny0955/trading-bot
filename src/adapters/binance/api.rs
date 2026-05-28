@@ -67,6 +67,7 @@ pub struct BinanceOrderApi {
     pub(crate) ws_tx: Sender<String>,
     pub(crate) pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     pub(crate) client: Client,
+    pub(crate) rate_limit: Arc<crate::adapters::binance::rate_limit::RateLimitTracker>,
 }
 
 impl BinanceOrderApi {
@@ -101,6 +102,7 @@ impl BinanceOrderApi {
             ws_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             client,
+            rate_limit: Arc::new(crate::adapters::binance::rate_limit::RateLimitTracker::new()),
         });
         Ok((executor, ws_rx))
     }
@@ -153,15 +155,31 @@ impl BinanceOrderApi {
     }
 
     pub(crate) async fn get_listen_key(&self) -> Result<String> {
+        use crate::adapters::binance::rate_limit::{parse_retry_after, parse_used_weight};
+
+        self.rate_limit.await_capacity().await;
+
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
-        let val = self
+        let resp = self
             .client
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
-            .await?
-            .json::<Value>()
             .await?;
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        self.rate_limit
+            .record_used_weight(parse_used_weight(&headers));
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            self.rate_limit.record_429(parse_retry_after(&headers));
+            anyhow::bail!("listenKey 발급 rate limited: status=429");
+        }
+        if status.as_u16() == 418 {
+            self.rate_limit.record_429(Some(Duration::from_secs(300)));
+            anyhow::bail!("listenKey 발급 IP banned: status=418");
+        }
+
+        let val = resp.error_for_status()?.json::<Value>().await?;
 
         val["listenKey"]
             .as_str()
@@ -170,14 +188,31 @@ impl BinanceOrderApi {
     }
 
     pub(crate) async fn renew_listen_key(&self, listen_key: &str) -> Result<()> {
+        use crate::adapters::binance::rate_limit::{parse_retry_after, parse_used_weight};
+
+        self.rate_limit.await_capacity().await;
+
         let url = format!("{}/fapi/v1/listenKey", self.rest_base);
-        self.client
+        let resp = self
+            .client
             .put(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .query(&[("listenKey", listen_key)])
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        self.rate_limit
+            .record_used_weight(parse_used_weight(&headers));
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            self.rate_limit.record_429(parse_retry_after(&headers));
+            anyhow::bail!("listenKey 갱신 rate limited: status=429");
+        }
+        if status.as_u16() == 418 {
+            self.rate_limit.record_429(Some(Duration::from_secs(300)));
+            anyhow::bail!("listenKey 갱신 IP banned: status=418");
+        }
+        resp.error_for_status()?;
 
         Ok(())
     }

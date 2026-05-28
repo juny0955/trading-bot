@@ -32,7 +32,10 @@ struct UserStreamSession {
 impl WsSession for UserStreamSession {
     async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
         let listen_key = self.api.get_listen_key().await.map_err(|e| {
-            if format!("{e}").contains("401") || format!("{e}").contains("403") {
+            let msg = format!("{e:#}");
+            if msg.contains("429") {
+                WsError::RateLimited { retry_after: None }
+            } else if msg.contains("401") || msg.contains("403") {
                 WsError::fatal(e)
             } else {
                 WsError::retryable(e)
@@ -60,8 +63,12 @@ impl WsSession for UserStreamSession {
                 }
                 _ = renew_interval.tick() => {
                     if let Err(e) = self.api.renew_listen_key(&listen_key).await {
-                          warn!(error = %e, "listenKey 갱신 실패");
-                          return Err(WsError::Retryable(e));
+                        warn!(error = %e, "listenKey 갱신 실패");
+                        let msg = format!("{e:#}");
+                        if msg.contains("429") {
+                            return Err(WsError::RateLimited { retry_after: None });
+                        }
+                        return Err(WsError::Retryable(e));
                     }
                     info!("User WS listenKey 갱신 성공");
                 }

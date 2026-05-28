@@ -27,10 +27,18 @@ struct OrderStreamSession {
 #[async_trait]
 impl WsSession for OrderStreamSession {
     async fn run_once(&mut self, token: CancellationToken) -> Result<(), WsError> {
-        let (ws_stream, _) = connect_async(&self.api.order_ws_url)
-            .await
-            .inspect_err(|e| error!(error = %e, "Order WS 연결 실패"))
-            .map_err(WsError::retryable)?;
+        let (ws_stream, _) = match connect_async(&self.api.order_ws_url).await {
+            Ok(v) => v,
+            Err(e) => {
+                error!(error = %e, "Order WS 연결 실패");
+                if let tokio_tungstenite::tungstenite::Error::Http(resp) = &e
+                    && resp.status() == 429
+                {
+                    return Err(WsError::RateLimited { retry_after: None });
+                }
+                return Err(WsError::retryable(e));
+            }
+        };
         info!(url = %self.api.order_ws_url, "Order WS 연결");
         let (mut write, mut read) = ws_stream.split();
 

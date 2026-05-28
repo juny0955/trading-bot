@@ -1,5 +1,6 @@
 use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::application::account_state::AccountState;
+use crate::application::circuit_breaker_controller::CircuitBreakerController;
 use crate::application::decision_logger::DecisionLogger;
 use crate::application::limit_order_monitor::LimitOrderMonitor;
 use crate::application::position_lifecycle_tracker::PositionLifecycleTracker;
@@ -37,6 +38,7 @@ pub struct LiveTrader {
     account_src: Arc<dyn AccountSource>,
     book_ticker_cache: Arc<BookTickerCache>,
     account_state: Arc<AccountState>,
+    circuit_breaker: Arc<CircuitBreakerController>,
     trade_manager: Arc<TradeManager>,
     lifecycle_tracker: Arc<PositionLifecycleTracker>,
     decision_logger: Arc<DecisionLogger>,
@@ -52,6 +54,7 @@ impl LiveTrader {
         account_src: Arc<dyn AccountSource>,
         book_ticker_cache: Arc<BookTickerCache>,
         account_state: Arc<AccountState>,
+        circuit_breaker: Arc<CircuitBreakerController>,
         trade_manager: Arc<TradeManager>,
         lifecycle_tracker: Arc<PositionLifecycleTracker>,
         decision_logger: Arc<DecisionLogger>,
@@ -64,6 +67,7 @@ impl LiveTrader {
             account_src,
             book_ticker_cache,
             account_state,
+            circuit_breaker,
             trade_manager,
             lifecycle_tracker,
             decision_logger,
@@ -83,6 +87,11 @@ impl TradingUseCase for LiveTrader {
     ) -> Result<()> {
         let (market_tx, mut market_rx) = mpsc::channel::<MarketDataEvent>(256);
         spawn_market_feed(feed, market_tx, token.clone());
+        spawn_equity_sampler(
+            self.account_state.clone(),
+            self.circuit_breaker.clone(),
+            token.clone(),
+        );
 
         let equity = self.account_state.available_balance();
         self.start_strategies(&mut strategies, equity, None).await?;
@@ -133,6 +142,24 @@ fn spawn_market_feed(
 ) {
     tokio::spawn(async move {
         feed.run(market_tx, token).await;
+    });
+}
+
+fn spawn_equity_sampler(
+    account: Arc<AccountState>,
+    cb: Arc<CircuitBreakerController>,
+    token: CancellationToken,
+) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => break,
+                _ = tick.tick() => {
+                    cb.record_balance(account.available_balance());
+                }
+            }
+        }
     });
 }
 
