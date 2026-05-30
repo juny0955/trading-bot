@@ -57,6 +57,7 @@ pub struct Context {
 /// });
 /// assert!(matches!(command, StrategyCommand::SubmitOrder(_)));
 /// ```
+#[derive(Debug, Clone)]
 pub enum StrategyCommand {
     SubmitOrder(OrderRequest),
     /// 포지션 손절 주문: `side`·`qty`·`stop_price`로 STOP_MARKET reduce-only 주문을 제출한다.

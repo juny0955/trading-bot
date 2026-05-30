@@ -1,4 +1,5 @@
 use crate::application::backtest::backtest_executor::{BacktestOrderExecutor, PortfolioSnapshot};
+use crate::application::fee_guard::{FeeGuardConfig, Quote, filter_command_batch};
 use crate::domain::backtest::{Bar, DepthSnapshot, Event};
 use crate::domain::order::{OrderRequest, OrderSide, OrderType};
 use crate::domain::strategies::{Context, Strategy, StrategyCommand};
@@ -6,10 +7,11 @@ use crate::ports::market_data_source::{
     BarInterval, BarQuery, DepthQuery, DepthSampleInterval, MarketDataSource,
 };
 use crate::ports::order_executor::OrderExecutor;
+use crate::ports::outbound::risk_config_source::RiskLimits;
 use anyhow::{Context as AnyhowContext, Result};
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 /// 백테스트 실행 조건입니다.
 ///
@@ -152,17 +154,22 @@ async fn run_inner(
     // 현재 활성 SL 주문 ID (새 SL 설정 시 이전 주문 취소)
     let mut current_sl: Option<uuid::Uuid> = None;
     let mut current_tp: Option<uuid::Uuid> = None;
+    let fee_guard_cfg = fee_guard_config(cfg);
 
     {
         let ctx = make_ctx(&executor, events[0].ts_ns())?;
         let cmds = strategy.on_start(&ctx)?;
-        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
+        dispatch(&executor, cmds, None, &fee_guard_cfg, &mut current_sl, &mut current_tp).await?;
     }
 
     for ev in events {
         let ts = ev.ts_ns();
         let buy_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Buy);
         let sell_price = pick_price(ev, last_depth, ts, depth_fresh_ns, OrderSide::Sell);
+        let quote = Quote {
+            bid: sell_price,
+            ask: buy_price,
+        };
         executor.drain_pending(buy_price, sell_price, ts)?;
 
         // Bar 이벤트에서 고저가 기준으로 StopMarket 주문 트리거 확인
@@ -182,7 +189,15 @@ async fn run_inner(
                 strategy.on_depth(d, &ctx)?
             }
         };
-        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
+        dispatch(
+            &executor,
+            cmds,
+            Some(quote),
+            &fee_guard_cfg,
+            &mut current_sl,
+            &mut current_tp,
+        )
+        .await?;
     }
 
     close_open_position(&executor, cfg, events, &mut equity_curve).await?;
@@ -194,7 +209,7 @@ async fn run_inner(
             .context("events must not be empty after early return")?;
         let ctx = make_ctx(&executor, last)?;
         let cmds = strategy.on_finish(&ctx)?;
-        dispatch(&executor, cmds, &mut current_sl, &mut current_tp).await?;
+        dispatch(&executor, cmds, None, &fee_guard_cfg, &mut current_sl, &mut current_tp).await?;
     }
 
     Ok(BacktestResult {
@@ -311,9 +326,21 @@ fn equity_point(
 async fn dispatch(
     executor: &Arc<BacktestOrderExecutor>,
     cmds: Vec<StrategyCommand>,
+    quote: Option<Quote>,
+    fee_guard_cfg: &FeeGuardConfig,
     current_sl: &mut Option<uuid::Uuid>,
     current_tp: &mut Option<uuid::Uuid>,
 ) -> Result<()> {
+    let (cmds, rejects) = filter_command_batch(cmds, quote, fee_guard_cfg);
+    for reject in rejects {
+        warn!(
+            symbol = %reject.symbol,
+            side = ?reject.side,
+            reason = ?reject.reason,
+            "백테스트 비용 가드 신규 진입 차단"
+        );
+    }
+
     for cmd in cmds {
         match cmd {
             StrategyCommand::SubmitOrder(req) => {
@@ -363,6 +390,18 @@ async fn dispatch(
         }
     }
     Ok(())
+}
+
+fn fee_guard_config(cfg: &BacktestConfig) -> FeeGuardConfig {
+    let defaults = RiskLimits::default();
+    FeeGuardConfig {
+        fee_bps: cfg.fee_bps,
+        estimated_slippage_bps: defaults.estimated_slippage_bps,
+        max_spread_bps: defaults.max_spread_bps,
+        min_net_reward_risk: defaults.min_net_reward_risk,
+        min_net_reward_bps: defaults.min_net_reward_bps,
+        require_bracket_for_entry: defaults.require_bracket_for_entry,
+    }
 }
 
 fn pick_price(

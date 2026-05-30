@@ -175,6 +175,7 @@ async fn main() -> Result<()> {
         lifecycle_tracker,
         decision_logger,
         limit_monitor,
+        boot.risk_limits.clone(),
         TradeManagerParams::default(),
     ));
     let reconciler = OrderReconciler::new(

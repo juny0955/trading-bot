@@ -2,6 +2,7 @@ use crate::adapters::outbound::cache::book_ticker_cache::BookTickerCache;
 use crate::application::account_state::AccountState;
 use crate::application::circuit_breaker_controller::CircuitBreakerController;
 use crate::application::decision_logger::DecisionLogger;
+use crate::application::fee_guard::{FeeGuardConfig, Quote, filter_command_batch};
 use crate::application::limit_order_monitor::LimitOrderMonitor;
 use crate::application::position_lifecycle_tracker::PositionLifecycleTracker;
 use crate::application::trade_manager::{PositionKey, TradeManager, TradeManagerParams};
@@ -18,9 +19,11 @@ use crate::domain::strategies::{Context, Strategy, StrategyCommand};
 use crate::ports::account_source::AccountSource;
 use crate::ports::market_data_provider::MarketDataProvider;
 use crate::ports::order_service::OrderService;
+use crate::ports::outbound::risk_config_source::RiskLimits;
 use crate::ports::position_repository::PositionRepository;
 use crate::ports::trading_use_case::TradingUseCase;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -43,6 +46,7 @@ pub struct LiveTrader {
     lifecycle_tracker: Arc<PositionLifecycleTracker>,
     decision_logger: Arc<DecisionLogger>,
     limit_monitor: Arc<LimitOrderMonitor>,
+    risk_limits: Arc<ArcSwap<RiskLimits>>,
     tm_params: TradeManagerParams,
 }
 
@@ -59,6 +63,7 @@ impl LiveTrader {
         lifecycle_tracker: Arc<PositionLifecycleTracker>,
         decision_logger: Arc<DecisionLogger>,
         limit_monitor: Arc<LimitOrderMonitor>,
+        risk_limits: Arc<ArcSwap<RiskLimits>>,
         tm_params: TradeManagerParams,
     ) -> Self {
         Self {
@@ -72,6 +77,7 @@ impl LiveTrader {
             lifecycle_tracker,
             decision_logger,
             limit_monitor,
+            risk_limits,
             tm_params,
         }
     }
@@ -217,6 +223,19 @@ impl LiveTrader {
     // ── 전략 명령 실행 ────────────────────────────────────────────────────────
 
     async fn dispatch(&self, instance_id: i64, symbol: &str, cmds: Vec<StrategyCommand>) {
+        let cfg = FeeGuardConfig::from(&**self.risk_limits.load());
+        let quote = self.book_ticker_cache.get(symbol).map(quote_from_book);
+        let (cmds, rejects) = filter_command_batch(cmds, quote, &cfg);
+        for reject in rejects {
+            warn!(
+                instance_id,
+                symbol = %reject.symbol,
+                side = ?reject.side,
+                reason = ?reject.reason,
+                "비용 가드 신규 진입 차단"
+            );
+        }
+
         for cmd in cmds {
             match cmd {
                 StrategyCommand::SubmitOrder(req) => {
@@ -700,6 +719,13 @@ impl LiveTrader {
             position,
             fear_greed,
         }
+    }
+}
+
+fn quote_from_book(bt: BookTicker) -> Quote {
+    Quote {
+        bid: bt.bid_price,
+        ask: bt.ask_price,
     }
 }
 
