@@ -33,13 +33,25 @@ impl Strategy for BuyAndHold {
     fn on_bar(&mut self, bar: &Bar, _ctx: &Context) -> Result<Vec<StrategyCommand>> {
         if !self.fired {
             self.fired = true;
-            return Ok(vec![StrategyCommand::SubmitOrder(OrderRequest {
-                symbol: bar.symbol.clone(),
-                order_type: OrderType::Market,
-                side: OrderSide::Buy,
-                qty: self.qty,
-                ..Default::default()
-            })]);
+            return Ok(vec![
+                StrategyCommand::SubmitOrder(OrderRequest {
+                    symbol: bar.symbol.clone(),
+                    order_type: OrderType::Market,
+                    side: OrderSide::Buy,
+                    qty: self.qty,
+                    ..Default::default()
+                }),
+                StrategyCommand::SetStopLoss {
+                    side: OrderSide::Sell,
+                    qty: self.qty,
+                    stop_price: dec!(50),
+                },
+                StrategyCommand::SetTakeProfit {
+                    side: OrderSide::Sell,
+                    qty: self.qty,
+                    stop_price: dec!(300),
+                },
+            ]);
         }
         Ok(vec![])
     }

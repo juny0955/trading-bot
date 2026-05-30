@@ -56,6 +56,8 @@ struct BacktestState {
     pending: VecDeque<Uuid>,
     /// 가격 트리거 대기 중인 StopMarket 주문 (order_id, stop_price)
     stop_orders: VecDeque<Uuid>,
+    /// 가격 트리거 대기 중인 TakeProfit 주문 (order_id, stop_price)
+    take_profit_orders: VecDeque<Uuid>,
     fills_log: Vec<Fill>,
     next_exchange_order_id: i64,
 }
@@ -98,6 +100,7 @@ impl BacktestOrderExecutor {
                 orders: HashMap::new(),
                 pending: VecDeque::new(),
                 stop_orders: VecDeque::new(),
+                take_profit_orders: VecDeque::new(),
                 fills_log: Vec::new(),
                 next_exchange_order_id: 0,
             }),
@@ -237,49 +240,36 @@ impl BacktestOrderExecutor {
             portfolio,
             orders,
             stop_orders,
+            take_profit_orders,
             fills_log,
             ..
         } = &mut *st_guard;
 
-        if stop_orders.is_empty() {
+        if stop_orders.is_empty() && take_profit_orders.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut result = Vec::new();
-        let mut remaining = VecDeque::new();
-
-        while let Some(id) = stop_orders.pop_front() {
-            let Some(order) = orders.get_mut(&id) else {
-                continue;
-            };
-            let Some(stop_price) = order.stop_price else {
-                remaining.push_back(id);
-                continue;
-            };
-
-            let triggered = match order.side {
-                OrderSide::Sell => low <= stop_price, // SL 롱 / TP 숏
-                OrderSide::Buy => high >= stop_price, // SL 숏 / TP 롱
-            };
-
-            if !triggered {
-                remaining.push_back(id);
-                continue;
-            }
-
-            let exec_price = stop_price; // 슬리피지 없이 stop_price에 체결
-            let fills = portfolio.execute_simulated(order, exec_price, ts_ns)?;
-            for f in fills.iter().cloned() {
-                fills_log.push(f);
-            }
-            result.extend(fills);
-            order.status = OrderStatus::Filled;
-            order.filled_qty = order.qty;
-            order.avg_fill_price = Some(exec_price);
-            order.updated_at = Utc::now();
-        }
-
-        *stop_orders = remaining;
+        result.extend(drain_trigger_queue(
+            portfolio,
+            orders,
+            stop_orders,
+            fills_log,
+            low,
+            high,
+            ts_ns,
+            stop_triggered,
+        )?);
+        result.extend(drain_trigger_queue(
+            portfolio,
+            orders,
+            take_profit_orders,
+            fills_log,
+            low,
+            high,
+            ts_ns,
+            take_profit_triggered,
+        )?);
         Ok(result)
     }
 
@@ -331,13 +321,96 @@ impl BacktestOrderExecutor {
         }
         st.pending.retain(|oid| *oid != id);
         st.stop_orders.retain(|oid| *oid != id);
+        st.take_profit_orders.retain(|oid| *oid != id);
         Ok(())
+    }
+
+    pub async fn submit_take_profit(&self, request: OrderRequest) -> Result<Order, OrderError> {
+        if request.order_type != OrderType::StopMarket {
+            return Err(OrderError::InvalidRequest(format!(
+                "TakeProfit 백테스트 주문은 StopMarket 기반이어야 함: {:?}",
+                request.order_type
+            )));
+        }
+        if request.stop_price.is_none() {
+            return Err(OrderError::InvalidRequest(
+                "TakeProfit 주문에 stop_price 필수".into(),
+            ));
+        }
+        let mut order = Order::new_from_request(request)?;
+        let mut st = self.state().map_err(OrderError::from)?;
+        st.next_exchange_order_id += 1;
+        order.exchange_order_id = Some(st.next_exchange_order_id);
+        st.orders.insert(order.id, order.clone());
+        st.take_profit_orders.push_back(order.id);
+        Ok(order)
     }
 
     fn state(&self) -> Result<MutexGuard<'_, BacktestState>, BacktestExecutorError> {
         self.state
             .lock()
             .map_err(|_| BacktestExecutorError::StatePoisoned)
+    }
+}
+
+fn drain_trigger_queue(
+    portfolio: &mut Portfolio,
+    orders: &mut HashMap<Uuid, Order>,
+    queue: &mut VecDeque<Uuid>,
+    fills_log: &mut Vec<Fill>,
+    low: Decimal,
+    high: Decimal,
+    ts_ns: i64,
+    triggered: fn(OrderSide, Decimal, Decimal, Decimal) -> bool,
+) -> Result<Vec<Fill>, BacktestExecutorError> {
+    let mut result = Vec::new();
+    let mut remaining = VecDeque::new();
+
+    while let Some(id) = queue.pop_front() {
+        let Some(order) = orders.get_mut(&id) else {
+            continue;
+        };
+        let Some(stop_price) = order.stop_price else {
+            remaining.push_back(id);
+            continue;
+        };
+
+        if !triggered(order.side, stop_price, low, high) {
+            remaining.push_back(id);
+            continue;
+        }
+
+        let fills = portfolio.execute_simulated(order, stop_price, ts_ns)?;
+        for f in fills.iter().cloned() {
+            fills_log.push(f);
+        }
+        result.extend(fills);
+        order.status = OrderStatus::Filled;
+        order.filled_qty = order.qty;
+        order.avg_fill_price = Some(stop_price);
+        order.updated_at = Utc::now();
+    }
+
+    *queue = remaining;
+    Ok(result)
+}
+
+fn stop_triggered(side: OrderSide, stop_price: Decimal, low: Decimal, high: Decimal) -> bool {
+    match side {
+        OrderSide::Sell => low <= stop_price,
+        OrderSide::Buy => high >= stop_price,
+    }
+}
+
+fn take_profit_triggered(
+    side: OrderSide,
+    stop_price: Decimal,
+    low: Decimal,
+    high: Decimal,
+) -> bool {
+    match side {
+        OrderSide::Sell => high >= stop_price,
+        OrderSide::Buy => low <= stop_price,
     }
 }
 
@@ -390,6 +463,7 @@ impl OrderExecutor for BacktestOrderExecutor {
         let cancelled = o.clone();
         st.pending.retain(|id| *id != order.id);
         st.stop_orders.retain(|id| *id != order.id);
+        st.take_profit_orders.retain(|id| *id != order.id);
         Ok(cancelled)
     }
 

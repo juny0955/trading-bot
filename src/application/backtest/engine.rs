@@ -159,7 +159,16 @@ async fn run_inner(
     {
         let ctx = make_ctx(&executor, events[0].ts_ns())?;
         let cmds = strategy.on_start(&ctx)?;
-        dispatch(&executor, cmds, None, &fee_guard_cfg, &mut current_sl, &mut current_tp).await?;
+        dispatch(
+            &executor,
+            &cfg.symbol,
+            cmds,
+            None,
+            &fee_guard_cfg,
+            &mut current_sl,
+            &mut current_tp,
+        )
+        .await?;
     }
 
     for ev in events {
@@ -191,6 +200,7 @@ async fn run_inner(
         };
         dispatch(
             &executor,
+            &cfg.symbol,
             cmds,
             Some(quote),
             &fee_guard_cfg,
@@ -209,7 +219,16 @@ async fn run_inner(
             .context("events must not be empty after early return")?;
         let ctx = make_ctx(&executor, last)?;
         let cmds = strategy.on_finish(&ctx)?;
-        dispatch(&executor, cmds, None, &fee_guard_cfg, &mut current_sl, &mut current_tp).await?;
+        dispatch(
+            &executor,
+            &cfg.symbol,
+            cmds,
+            None,
+            &fee_guard_cfg,
+            &mut current_sl,
+            &mut current_tp,
+        )
+        .await?;
     }
 
     Ok(BacktestResult {
@@ -325,6 +344,7 @@ fn equity_point(
 
 async fn dispatch(
     executor: &Arc<BacktestOrderExecutor>,
+    symbol: &str,
     cmds: Vec<StrategyCommand>,
     quote: Option<Quote>,
     fee_guard_cfg: &FeeGuardConfig,
@@ -357,6 +377,7 @@ async fn dispatch(
                 }
                 let order = executor
                     .submit(OrderRequest {
+                        symbol: symbol.to_string(),
                         order_type: OrderType::StopMarket,
                         side,
                         qty,
@@ -376,7 +397,8 @@ async fn dispatch(
                     executor.cancel_order_id(old_id)?;
                 }
                 let order = executor
-                    .submit(OrderRequest {
+                    .submit_take_profit(OrderRequest {
+                        symbol: symbol.to_string(),
                         order_type: OrderType::StopMarket,
                         side,
                         qty,
