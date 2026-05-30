@@ -174,6 +174,9 @@ fn write_comparison_csv(
         "max_drawdown_pct",
         "win_rate",
         "profit_factor",
+        "gross_profit_factor",
+        "total_fees",
+        "avg_fee_bps",
         "num_trades",
     ])?;
     for (i, name, params, s) in rows {
@@ -186,6 +189,9 @@ fn write_comparison_csv(
             s.max_drawdown_pct.to_string(),
             s.win_rate.to_string(),
             s.profit_factor.map_or(String::new(), |v| v.to_string()),
+            s.gross_profit_factor.map_or(String::new(), |v| v.to_string()),
+            s.total_fees.to_string(),
+            s.avg_fee_bps.to_string(),
             s.num_trades.to_string(),
         ])?;
     }

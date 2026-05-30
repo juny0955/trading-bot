@@ -107,6 +107,9 @@ fn write_equity(out_dir: &Path, curve: &[EquityPoint]) -> Result<()> {
 ///     max_drawdown_pct: dec!(0),
 ///     sharpe_ratio: None,
 ///     profit_factor: None,
+///     gross_profit_factor: None,
+///     total_fees: dec!(0),
+///     avg_fee_bps: dec!(0),
 ///     avg_win: dec!(0),
 ///     avg_loss: dec!(0),
 ///     avg_trade_duration_s: dec!(0),
@@ -124,6 +127,9 @@ pub struct Summary {
     pub max_drawdown_pct: Decimal,
     pub sharpe_ratio: Option<f64>,
     pub profit_factor: Option<Decimal>,
+    pub gross_profit_factor: Option<Decimal>,
+    pub total_fees: Decimal,
+    pub avg_fee_bps: Decimal,
     pub avg_win: Decimal,
     pub avg_loss: Decimal,
     pub avg_trade_duration_s: Decimal,
@@ -157,7 +163,10 @@ pub fn build_summary(result: &BacktestResult) -> Summary {
         win_rate: win_rate(trades),
         max_drawdown_pct: max_drawdown_pct(&result.equity_curve),
         sharpe_ratio: sharpe_ratio(&result.equity_curve),
-        profit_factor: profit_factor(trades),
+        profit_factor: net_profit_factor(trades),
+        gross_profit_factor: gross_profit_factor(trades),
+        total_fees: total_fees(trades),
+        avg_fee_bps: avg_fee_bps(trades),
         avg_win,
         avg_loss,
         avg_trade_duration_s: avg_duration_s(trades),
@@ -229,7 +238,24 @@ fn sharpe_ratio(curve: &[EquityPoint]) -> Option<f64> {
     Some(mean / std_dev * (252f64).sqrt())
 }
 
-fn profit_factor(trades: &[ClosedTrade]) -> Option<Decimal> {
+fn net_profit_factor(trades: &[ClosedTrade]) -> Option<Decimal> {
+    let net_win: Decimal = trades
+        .iter()
+        .filter(|t| t.net_pnl > Decimal::zero())
+        .map(|t| t.net_pnl)
+        .sum();
+    let net_loss: Decimal = trades
+        .iter()
+        .filter(|t| t.net_pnl < Decimal::zero())
+        .map(|t| t.net_pnl.abs())
+        .sum();
+    if net_loss.is_zero() {
+        return None;
+    }
+    Some(net_win / net_loss)
+}
+
+fn gross_profit_factor(trades: &[ClosedTrade]) -> Option<Decimal> {
     let gross_win: Decimal = trades
         .iter()
         .filter(|t| t.gross_pnl > Decimal::zero())
@@ -244,6 +270,22 @@ fn profit_factor(trades: &[ClosedTrade]) -> Option<Decimal> {
         return None;
     }
     Some(gross_win / gross_loss)
+}
+
+fn total_fees(trades: &[ClosedTrade]) -> Decimal {
+    trades.iter().map(|t| t.fees).sum()
+}
+
+fn avg_fee_bps(trades: &[ClosedTrade]) -> Decimal {
+    let notional: Decimal = trades
+        .iter()
+        .map(|t| (t.entry_price * t.qty) + (t.exit_price * t.qty))
+        .sum();
+    if notional.is_zero() {
+        Decimal::zero()
+    } else {
+        total_fees(trades) / notional * Decimal::from(10_000)
+    }
 }
 
 fn avg_win_loss(trades: &[ClosedTrade]) -> (Decimal, Decimal) {
@@ -324,6 +366,18 @@ mod tests {
         }
     }
 
+    fn result_with_trades(trades: Vec<ClosedTrade>) -> BacktestResult {
+        BacktestResult {
+            portfolio: PortfolioSnapshot {
+                equity: dec!(1000),
+                initial_equity: dec!(1000),
+                position: Position::default(),
+                closed_trades: trades,
+            },
+            equity_curve: vec![],
+        }
+    }
+
     #[test]
     fn build_summary_calculates_core_metrics() -> anyhow::Result<()> {
         let summary = build_summary(&result_with_trade(dec!(9)));
@@ -332,6 +386,7 @@ mod tests {
         assert_eq!(summary.win_rate, dec!(1));
         assert_eq!(summary.max_drawdown_pct, dec!(10.0));
         assert_eq!(summary.avg_trade_duration_s, dec!(1));
+        assert_eq!(summary.total_fees, dec!(1));
         Ok(())
     }
 
@@ -340,6 +395,43 @@ mod tests {
         let summary = build_summary(&result_with_trade(dec!(-3)));
         assert_eq!(summary.win_rate, dec!(0));
         assert_eq!(summary.avg_loss, dec!(3));
+        Ok(())
+    }
+
+    #[test]
+    fn profit_factor_uses_net_pnl_and_keeps_gross_metric() -> anyhow::Result<()> {
+        let trades = vec![
+            ClosedTrade {
+                entry_ts_ns: 0,
+                exit_ts_ns: 1,
+                side: OrderSide::Buy,
+                qty: dec!(1),
+                entry_price: dec!(100),
+                exit_price: dec!(110),
+                fees: dec!(3),
+                gross_pnl: dec!(10),
+                net_pnl: dec!(7),
+            },
+            ClosedTrade {
+                entry_ts_ns: 2,
+                exit_ts_ns: 3,
+                side: OrderSide::Buy,
+                qty: dec!(1),
+                entry_price: dec!(100),
+                exit_price: dec!(94),
+                fees: dec!(2),
+                gross_pnl: dec!(-6),
+                net_pnl: dec!(-8),
+            },
+        ];
+        let summary = build_summary(&result_with_trades(trades));
+        assert_eq!(summary.profit_factor, Some(dec!(0.875)));
+        assert_eq!(summary.gross_profit_factor, Some(dec!(1.6666666666666666666666666667)));
+        assert_eq!(summary.total_fees, dec!(5));
+        assert_eq!(
+            summary.avg_fee_bps,
+            dec!(5) / dec!(404) * Decimal::from(10_000)
+        );
         Ok(())
     }
 }
