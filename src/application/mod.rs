@@ -7,6 +7,7 @@ pub mod circuit_breaker_controller;
 pub mod daily_reporter;
 pub mod decision_logger;
 pub mod exchange_info_refresher;
+pub mod fee_guard;
 pub mod limit_order_monitor;
 pub mod live_order_service;
 pub mod live_trader;
