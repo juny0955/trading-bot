@@ -47,6 +47,12 @@ fn apply(limits: &mut RiskLimits, key: &str, value: &str) {
         "order_ttl_sec" => parse_into(value, &mut limits.order_ttl_sec),
         "min_available_balance" => parse_decimal(value, &mut limits.min_available_balance),
         "slippage_buffer_bps" => parse_into(value, &mut limits.slippage_buffer_bps),
+        "fee_bps" => parse_decimal(value, &mut limits.fee_bps),
+        "estimated_slippage_bps" => parse_decimal(value, &mut limits.estimated_slippage_bps),
+        "max_spread_bps" => parse_decimal(value, &mut limits.max_spread_bps),
+        "min_net_reward_risk" => parse_decimal(value, &mut limits.min_net_reward_risk),
+        "min_net_reward_bps" => parse_decimal(value, &mut limits.min_net_reward_bps),
+        "require_bracket_for_entry" => parse_bool(value, &mut limits.require_bracket_for_entry),
         "cb_consecutive_failure_threshold" => {
             parse_into(value, &mut limits.cb_consecutive_failure_threshold)
         }
@@ -66,6 +72,12 @@ fn parse_into<T: FromStr>(s: &str, target: &mut T) {
 
 fn parse_decimal(s: &str, target: &mut Decimal) {
     if let Ok(v) = Decimal::from_str(s) {
+        *target = v;
+    }
+}
+
+fn parse_bool(s: &str, target: &mut bool) {
+    if let Ok(v) = s.parse::<bool>() {
         *target = v;
     }
 }
