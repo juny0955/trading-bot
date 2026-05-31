@@ -18,7 +18,7 @@ pub struct Bracket {
     pub take_profit_price: Decimal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FeeGuardReport {
     pub entry_price: Decimal,
     pub spread_bps: Decimal,
@@ -84,16 +84,13 @@ pub fn evaluate_entry(
     quote: Option<Quote>,
     cfg: &FeeGuardConfig,
 ) -> Result<FeeGuardDecision, FeeGuardReject> {
-    if req.reduce_only {
-        return Err(FeeGuardReject::InvalidPrice);
-    }
-
-    let quote = quote.ok_or(FeeGuardReject::MissingQuote)?;
     let bracket = match bracket {
         Some(v) => v,
         None if cfg.require_bracket_for_entry => return Err(FeeGuardReject::MissingBracket),
-        None => return Err(FeeGuardReject::MissingBracket),
+        None => return Ok(FeeGuardDecision { report: FeeGuardReport::default() }),
     };
+
+    let quote = quote.ok_or(FeeGuardReject::MissingQuote)?;
 
     validate_positive(quote.bid)?;
     validate_positive(quote.ask)?;

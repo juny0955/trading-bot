@@ -44,7 +44,7 @@ impl Default for RiskLimits {
             max_spread_bps: dec!(10),
             min_net_reward_risk: dec!(1.2),
             min_net_reward_bps: dec!(10),
-            require_bracket_for_entry: true,
+            require_bracket_for_entry: false,
             cb_consecutive_failure_threshold: 5,
             cb_failure_window_sec: 60,
             cb_open_duration_sec: 120,
