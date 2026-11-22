@@ -31,4 +31,5 @@ hmac = "0.13.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
 ta = "0.5.0"
+fin-primitives = { version = "4.0.1", default-features = false, features = ["indicators"] }
 arc-swap = "1.7"
