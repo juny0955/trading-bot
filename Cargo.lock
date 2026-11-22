@@ -663,6 +663,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fin-primitives"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea881ed57c18c5e839ac4ea0b0d91b3f9e499412e5957e4608ac9efa62c716b"
+dependencies = [
+ "chrono",
+ "libm",
+ "rust_decimal",
+ "thiserror",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2929,6 +2941,7 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
+ "fin-primitives",
  "futures-util",
  "hex",
  "hmac 0.13.0",
